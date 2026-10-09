@@ -25,6 +25,11 @@ def _build_parser() -> argparse.ArgumentParser:
     answer_parser = subparsers.add_parser("answer", help="run one answer pipeline")
     answer_parser.add_argument("--title", required=True, help="target window title pattern")
     answer_parser.add_argument("--real", action="store_true", help="use real capture, OCR, and LLM")
+    speak_parser = subparsers.add_parser("speak", help="demonstrate looped speech")
+    speak_parser.add_argument("text")
+    speak_parser.add_argument("--loops", type=int, default=1)
+    speak_parser.add_argument("--interval", type=float, default=0.1)
+    speak_parser.add_argument("--real", action="store_true", help="use pyttsx3")
     subparsers.add_parser("show-config", help="print effective settings with secrets masked")
     return parser
 
@@ -180,6 +185,43 @@ def main(argv: Sequence[str] | None = None) -> int:
         if reconfigure is not None:
             reconfigure(encoding="utf-8")
         Presenter(settings, _printer=print).show(result.answer)
+
+    if args.command == "speak":
+        import sys
+        import time
+
+        from examchaiter.tts import FakeSpeaker, LoopSpeaker, Pyttsx3Speaker, Speaker
+
+        speaker: Speaker
+
+        if args.loops < 1 or args.interval < 0:
+            print("ERROR: --loops must be >= 1 and --interval must be >= 0", file=sys.stderr)
+            return 1
+
+        if args.real:
+            speaker = Pyttsx3Speaker(rate=Settings().tts_rate)
+            if speaker._disabled:
+                print("ERROR: pyttsx3 is unavailable or failed to initialize", file=sys.stderr)
+                return 1
+        else:
+            speaker = FakeSpeaker()
+
+        loop = LoopSpeaker(speaker, interval_s=args.interval)
+        loop.start(args.text)
+        if isinstance(speaker, FakeSpeaker):
+            deadline = time.monotonic() + args.interval * args.loops + 0.2
+            poll_interval = max(0.001, min(0.01, args.interval / 2 or 0.01))
+            while len(speaker.spoken) < args.loops and time.monotonic() < deadline:
+                time.sleep(poll_interval)
+        else:
+            time.sleep(args.interval * max(0, args.loops - 1))
+        loop.stop()
+
+        reconfigure = getattr(sys.stdout, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8")
+        spoken = speaker.spoken if isinstance(speaker, FakeSpeaker) else [args.text] * args.loops
+        print(f"spoken={spoken}")
 
     if args.command == "list-windows":
         from examchaiter.capture.window import list_windows

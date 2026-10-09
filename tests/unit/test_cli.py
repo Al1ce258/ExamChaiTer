@@ -78,3 +78,9 @@ def test_answer_command_without_real_prints_display(capsys: pytest.CaptureFixtur
     main(["answer", "--title", "任意"])
 
     assert capsys.readouterr().out == "答案：B\n"
+
+
+def test_speak_command_without_real_prints_spoken_text(capsys: pytest.CaptureFixture[str]) -> None:
+    main(["speak", "测试", "--loops", "2", "--interval", "0.01"])
+
+    assert capsys.readouterr().out == "spoken=['测试', '测试']\n"
