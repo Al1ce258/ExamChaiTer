@@ -159,7 +159,11 @@ ExamChaiTer.spec（仓库根）
 # ---- models ----
 Answer.qtype: QuestionType           # CHOICE / FILL / SHORT / UNKNOWN
 Answer.content: str                  # ← 唯一对外输出，纯答案
-PipelineResult.reused: bool          # True = 命中去重，未调 LLM
+@dataclass
+class PipelineResult:
+    question: Question
+    answer: Answer
+    reused: bool = False
 
 # ---- pipeline ----
 ExamPipeline.run_once(hwnd: int) -> PipelineResult | None
