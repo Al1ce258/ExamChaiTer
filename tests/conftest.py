@@ -6,41 +6,32 @@ import numpy as np
 import pytest
 
 from examchaiter.config import Settings
+from examchaiter.llm.client import FakeLLMClient
 from examchaiter.models import OcrBlock
+from examchaiter.ocr.engine import FakeOcrEngine
+from examchaiter.output.presenter import Presenter
 
 
 @dataclass
 class FakeCapture:
-    """Synthetic frame source that never reads the screen."""
+    """Synthetic capture source that never reads the screen."""
 
-    frame: np.ndarray
+    rect: tuple[int, int, int, int] = (0, 0, 100, 100)
+    img: np.ndarray = field(default_factory=lambda: np.full((100, 100, 3), 255, dtype=np.uint8))
+    alive: bool = True
+    focus: bool = True
 
-    def grab(self) -> np.ndarray:
-        return self.frame.copy()
+    def get_window_rect(self, _hwnd: int) -> tuple[int, int, int, int]:
+        return self.rect
 
+    def is_window_alive(self, _hwnd: int) -> bool:
+        return self.alive
 
-@dataclass
-class FakeOcrEngine:
-    """OCR double that returns pre-built blocks."""
+    def focus_window(self, _hwnd: int) -> bool:
+        return self.focus
 
-    blocks: list[OcrBlock]
-
-    def recognize(self, _image: np.ndarray) -> list[OcrBlock]:
-        return list(self.blocks)
-
-
-@dataclass
-class FakeLLMClient:
-    """LLM double that returns queued responses in order."""
-
-    responses: list[str]
-    calls: list[list[dict[str, str]]] = field(default_factory=list)
-
-    def complete(self, messages: list[dict[str, str]]) -> str:
-        self.calls.append(messages)
-        if not self.responses:
-            raise LookupError("FakeLLMClient has no queued response")
-        return self.responses.pop(0)
+    def grab_window(self, _hwnd: int) -> np.ndarray:
+        return self.img.copy()
 
 
 @dataclass
@@ -55,8 +46,7 @@ class FakeSpeaker:
 
 @pytest.fixture
 def fake_capture() -> FakeCapture:
-    frame = np.zeros((8, 8, 3), dtype=np.uint8)
-    return FakeCapture(frame=frame)
+    return FakeCapture()
 
 
 @pytest.fixture
@@ -77,6 +67,11 @@ def fake_llm() -> FakeLLMClient:
 @pytest.fixture
 def fake_speaker() -> FakeSpeaker:
     return FakeSpeaker()
+
+
+@pytest.fixture
+def fake_presenter(settings: Settings) -> Presenter:
+    return Presenter(settings, _printer=lambda _text: None)
 
 
 @pytest.fixture
