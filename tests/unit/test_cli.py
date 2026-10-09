@@ -1,5 +1,7 @@
 """Unit tests for the offline command-line entry point."""
 
+import sys
+
 import pytest
 from pytest_mock import MockerFixture
 
@@ -53,10 +55,26 @@ def test_show_config_command_includes_default_model(capsys: pytest.CaptureFixtur
     assert "llm_model=gpt-4o-mini" in capsys.readouterr().out
 
 
-def test_without_command_prints_available_commands(capsys: pytest.CaptureFixture[str]) -> None:
-    main([])
+def test_help_flag_prints_help(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["--help"])
 
-    assert "show-config" in capsys.readouterr().out
+    assert exc_info.value.code == 0 and "show-config" in capsys.readouterr().out
+
+
+def test_no_args_launches_gui(
+    monkeypatch: pytest.MonkeyPatch,
+    mocker: MockerFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(sys, "argv", ["examchaiter"])
+    run_gui = mocker.patch("examchaiter.__main__._run_gui", return_value=0)
+
+    result = main()
+
+    assert (
+        result == 0 and run_gui.call_args == mocker.call(fake=False) and not capsys.readouterr().out
+    )
 
 
 def test_ask_command_without_real_prints_choice(capsys: pytest.CaptureFixture[str]) -> None:

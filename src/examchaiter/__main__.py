@@ -1,6 +1,7 @@
 """Command-line entry point for the Phase 0 skeleton."""
 
 import argparse
+import sys
 from collections.abc import Sequence
 
 from examchaiter import __version__
@@ -46,7 +47,10 @@ def _display_settings(settings: Settings) -> dict[str, object]:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
-    args = parser.parse_args(argv)
+    raw_argv = list(argv) if argv is not None else sys.argv[1:]
+    if not raw_argv:
+        raw_argv = ["gui"]
+    args = parser.parse_args(raw_argv)
 
     if args.command is None:
         parser.print_help()
@@ -57,7 +61,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"{key}={value}")
 
     if args.command == "ocr-self-test":
-        import sys
         from pathlib import Path
         from typing import Any, cast
 
@@ -111,7 +114,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"content={answer.content}")
 
     if args.command == "answer":
-        import sys
         import time
         from types import SimpleNamespace
 
@@ -191,7 +193,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         Presenter(settings, _printer=print).show(result.answer)
 
     if args.command == "speak":
-        import sys
         import time
 
         from examchaiter.tts import FakeSpeaker, LoopSpeaker, Pyttsx3Speaker, Speaker
@@ -228,8 +229,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"spoken={spoken}")
 
     if args.command == "run":
-        import sys
-
         from examchaiter.app import ExamChaiTerApp, FakeHotkeyListener
         from examchaiter.output import Presenter
         from examchaiter.tts import FakeSpeaker, LoopSpeaker
@@ -262,57 +261,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return exit_code
 
     if args.command == "gui":
-        import sys
-        from typing import Any, cast
-
-        try:
-            from PySide6.QtWidgets import QApplication
-        except Exception as exc:
-            print(f"ERROR: PySide6 is unavailable: {exc}", file=sys.stderr)
-            return 1
-
-        from examchaiter.app import _build_pipeline
-        from examchaiter.gui.main_window import MainWindow
-        from examchaiter.gui.state import GuiController
-        from examchaiter.gui.tray import TrayController
-        from examchaiter.models import PipelineResult
-        from examchaiter.output import Presenter
-        from examchaiter.tts import FakeSpeaker, LoopSpeaker, Pyttsx3Speaker
-
-        settings = Settings()
-        argv = ["-platform", "offscreen"] if args.fake else sys.argv
-        instance = QApplication.instance()
-        qapp = cast(QApplication, instance) if instance is not None else QApplication(argv)
-
-        if args.fake:
-
-            class GuiSmokePipeline:
-                def run_once(self, _hwnd: int) -> PipelineResult | None:
-                    return None
-
-            controller = GuiController(
-                pipeline_factory=lambda: cast(Any, GuiSmokePipeline()),
-                loop_speaker=LoopSpeaker(FakeSpeaker()),
-                presenter=Presenter(settings, _printer=lambda _text: None),
-                settings=settings,
-                _list_windows_fn=lambda _title: [],
-            )
-        else:
-            controller = GuiController(
-                pipeline_factory=lambda: _build_pipeline(settings),
-                loop_speaker=LoopSpeaker(Pyttsx3Speaker(rate=settings.tts_rate)),
-                presenter=Presenter(settings),
-                settings=settings,
-            )
-
-        main_window = MainWindow(controller, settings)
-        _tray = TrayController(qapp, main_window, controller)
-        if args.fake:
-            print("gui-ok")
-            return 0
-
-        main_window.show()
-        return int(qapp.exec())
+        return _run_gui(fake=args.fake)
 
     if args.command == "list-windows":
         from examchaiter.capture.window import list_windows
@@ -328,6 +277,59 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"0x{window.hwnd:08X}\t{window.title}\t{left},{top},{right},{bottom}")
 
     return 0
+
+
+def _run_gui(*, fake: bool) -> int:
+    from typing import Any, cast
+
+    try:
+        from PySide6.QtWidgets import QApplication
+    except Exception as exc:
+        print(f"ERROR: PySide6 is unavailable: {exc}", file=sys.stderr)
+        return 1
+
+    from examchaiter.app import _build_pipeline
+    from examchaiter.gui.main_window import MainWindow
+    from examchaiter.gui.state import GuiController
+    from examchaiter.gui.tray import TrayController
+    from examchaiter.models import PipelineResult
+    from examchaiter.output import Presenter
+    from examchaiter.tts import FakeSpeaker, LoopSpeaker, Pyttsx3Speaker
+
+    settings = Settings()
+    argv = ["-platform", "offscreen"] if fake else sys.argv
+    instance = QApplication.instance()
+    qapp = cast(QApplication, instance) if instance is not None else QApplication(argv)
+
+    if fake:
+
+        class GuiSmokePipeline:
+            def run_once(self, _hwnd: int) -> PipelineResult | None:
+                return None
+
+        controller = GuiController(
+            pipeline_factory=lambda: cast(Any, GuiSmokePipeline()),
+            loop_speaker=LoopSpeaker(FakeSpeaker()),
+            presenter=Presenter(settings, _printer=lambda _text: None),
+            settings=settings,
+            _list_windows_fn=lambda _title: [],
+        )
+    else:
+        controller = GuiController(
+            pipeline_factory=lambda: _build_pipeline(settings),
+            loop_speaker=LoopSpeaker(Pyttsx3Speaker(rate=settings.tts_rate)),
+            presenter=Presenter(settings),
+            settings=settings,
+        )
+
+    main_window = MainWindow(controller, settings)
+    _tray = TrayController(qapp, main_window, controller)
+    if fake:
+        print("gui-ok")
+        return 0
+
+    main_window.show()
+    return int(qapp.exec())
 
 
 if __name__ == "__main__":
