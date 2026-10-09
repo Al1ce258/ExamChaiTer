@@ -84,3 +84,9 @@ def test_speak_command_without_real_prints_spoken_text(capsys: pytest.CaptureFix
     main(["speak", "测试", "--loops", "2", "--interval", "0.01"])
 
     assert capsys.readouterr().out == "spoken=['测试', '测试']\n"
+
+
+def test_run_dry_run_prints_hotkey_bindings(capsys: pytest.CaptureFixture[str]) -> None:
+    main(["run", "--dry-run"])
+
+    assert "<ctrl>+<alt>+q" in capsys.readouterr().out

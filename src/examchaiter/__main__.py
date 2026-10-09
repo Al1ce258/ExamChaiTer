@@ -30,6 +30,8 @@ def _build_parser() -> argparse.ArgumentParser:
     speak_parser.add_argument("--loops", type=int, default=1)
     speak_parser.add_argument("--interval", type=float, default=0.1)
     speak_parser.add_argument("--real", action="store_true", help="use pyttsx3")
+    run_parser = subparsers.add_parser("run", help="start the global-hotkey app")
+    run_parser.add_argument("--dry-run", action="store_true", help="print bindings without running")
     subparsers.add_parser("show-config", help="print effective settings with secrets masked")
     return parser
 
@@ -222,6 +224,40 @@ def main(argv: Sequence[str] | None = None) -> int:
             reconfigure(encoding="utf-8")
         spoken = speaker.spoken if isinstance(speaker, FakeSpeaker) else [args.text] * args.loops
         print(f"spoken={spoken}")
+
+    if args.command == "run":
+        import sys
+
+        from examchaiter.app import ExamChaiTerApp, FakeHotkeyListener
+        from examchaiter.output import Presenter
+        from examchaiter.tts import FakeSpeaker, LoopSpeaker
+
+        settings = Settings()
+        if args.dry_run:
+
+            class DryRunPipeline:
+                def run_once(self, _hwnd: int) -> None:
+                    return None
+
+            app = ExamChaiTerApp(
+                settings=settings,
+                pipeline=DryRunPipeline(),
+                loop_speaker=LoopSpeaker(FakeSpeaker()),
+                presenter=Presenter(settings, _printer=lambda _text: None),
+            )
+            listener = FakeHotkeyListener(app._create_bindings())
+            print(f"bindings={sorted(listener.bindings)}")
+            return 0
+
+        try:
+            app = ExamChaiTerApp(settings)
+        except Exception as exc:
+            print(f"ERROR: could not start application: {exc}", file=sys.stderr)
+            return 1
+        exit_code = app.run()
+        if exit_code != 0:
+            print("ERROR: application failed to start", file=sys.stderr)
+        return exit_code
 
     if args.command == "list-windows":
         from examchaiter.capture.window import list_windows
