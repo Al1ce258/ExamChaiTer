@@ -16,6 +16,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="show the installed version and exit",
     )
     subparsers = parser.add_subparsers(dest="command")
+    list_parser = subparsers.add_parser("list-windows", help="list visible top-level windows")
+    list_parser.add_argument("--filter", default=None, help="regular expression for window titles")
     subparsers.add_parser("show-config", help="print effective settings with secrets masked")
     return parser
 
@@ -37,6 +39,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "show-config":
         for key, value in sorted(_display_settings(Settings()).items()):
             print(f"{key}={value}")
+
+    if args.command == "list-windows":
+        from examchaiter.capture.window import list_windows
+        from examchaiter.errors import WindowError
+
+        try:
+            windows = list_windows(args.filter)
+        except WindowError as exc:
+            parser.error(str(exc))
+
+        for window in windows:
+            left, top, right, bottom = window.rect
+            print(f"0x{window.hwnd:08X}\t{window.title}\t{left},{top},{right},{bottom}")
 
     return 0
 
