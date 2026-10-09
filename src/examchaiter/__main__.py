@@ -18,6 +18,7 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
     list_parser = subparsers.add_parser("list-windows", help="list visible top-level windows")
     list_parser.add_argument("--filter", default=None, help="regular expression for window titles")
+    subparsers.add_parser("ocr-self-test", help="run the synthetic OCR smoke test")
     subparsers.add_parser("show-config", help="print effective settings with secrets masked")
     return parser
 
@@ -39,6 +40,31 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "show-config":
         for key, value in sorted(_display_settings(Settings()).items()):
             print(f"{key}={value}")
+
+    if args.command == "ocr-self-test":
+        import sys
+        from pathlib import Path
+        from typing import Any, cast
+
+        import numpy as np
+        from PIL import Image
+
+        from examchaiter.models import OcrBlock
+        from examchaiter.ocr import FakeOcrEngine, blocks_to_text
+
+        fixture_path = (
+            Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "synthetic_question.png"
+        )
+        with Image.open(fixture_path) as source:
+            image = np.asarray(source.convert("RGB"), dtype=np.uint8)
+
+        blocks = [
+            OcrBlock(text="第一行 题目示例", bbox=(40.0, 30.0, 400.0, 80.0), confidence=0.99),
+            OcrBlock(text="Second line sample", bbox=(40.0, 105.0, 450.0, 155.0), confidence=0.99),
+            OcrBlock(text="12345", bbox=(40.0, 180.0, 180.0, 230.0), confidence=0.99),
+        ]
+        cast(Any, sys.stdout).reconfigure(encoding="utf-8")
+        print(blocks_to_text(FakeOcrEngine(blocks=blocks).recognize(image)))
 
     if args.command == "list-windows":
         from examchaiter.capture.window import list_windows
