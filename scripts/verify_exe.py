@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
-from typing import TextIO
+from typing import BinaryIO
 
 EXE_PATH = Path(__file__).resolve().parents[1] / "dist" / "ExamChaiTer.exe"
 FAILURE_KEYWORDS = ("Traceback", "ModuleNotFoundError")
@@ -20,10 +20,20 @@ def _has_failure(text: str) -> bool:
     return any(keyword in text for keyword in FAILURE_KEYWORDS)
 
 
-def _terminate_tree(process: subprocess.Popen[str]) -> None:
+def _safe_output(text: str) -> str:
+    return text.encode("ascii", errors="backslashreplace").decode("ascii")
+
+
+def _terminate_tree(process: subprocess.Popen[bytes]) -> None:
     if os.name == "nt":
         subprocess.run(
             ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        subprocess.run(
+            ["taskkill", "/IM", "ExamChaiTer.exe", "/T", "/F"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=False,
@@ -37,10 +47,12 @@ def _terminate_tree(process: subprocess.Popen[str]) -> None:
         process.wait(timeout=5)
 
 
-def _read_output(output: TextIO, error: TextIO) -> str:
+def _read_output(output: BinaryIO, error: BinaryIO) -> str:
     output.seek(0)
     error.seek(0)
-    return f"{output.read()}\n{error.read()}"
+    stdout = output.read().decode("utf-8", errors="replace")
+    stderr = error.read().decode("utf-8", errors="replace")
+    return f"{stdout}\n{stderr}"
 
 
 def main() -> int:
@@ -49,27 +61,26 @@ def main() -> int:
         return 1
 
     with (
-        tempfile.TemporaryFile(mode="w+", encoding="utf-8") as stdout,
-        tempfile.TemporaryFile(mode="w+", encoding="utf-8") as stderr,
+        tempfile.TemporaryFile() as stdout,
+        tempfile.TemporaryFile() as stderr,
     ):
         process = subprocess.Popen(
             [str(EXE_PATH)],
             stdout=stdout,
             stderr=stderr,
-            text=True,
         )
         time.sleep(15)
         if process.poll() is None:
             _terminate_tree(process)
             output = _read_output(stdout, stderr)
             if _has_failure(output):
-                print(f"exe-crashed: {output.strip()}")
+                print(f"exe-crashed: {_safe_output(output.strip())}")
                 return 1
             print("exe-alive")
             return 0
 
         output = _read_output(stdout, stderr).strip()
-        print(f"exe-crashed: exit={process.returncode} {output}")
+        print(f"exe-crashed: exit={process.returncode} {_safe_output(output)}")
         return 1
 
 
