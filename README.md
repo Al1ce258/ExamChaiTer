@@ -1,6 +1,6 @@
 # ExamChaiTer
 
-**状态：Phase 9 完成，exe 可分发。**
+**状态：Phase 9.1 完成，exe 已可用。**
 
 ExamChaiTer 是一个 Windows 本地工具：聚焦指定窗口 -> 截图 -> OCR -> 调用
 OpenAI 兼容接口 -> 仅输出答案 -> 可选循环语音朗读。
