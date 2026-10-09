@@ -70,6 +70,20 @@ def test_openai_compat_client_with_retry_exhaustion_raises_llm_failed(
         client.complete([])
 
 
+def test_openai_compat_client_with_nested_response_status_retries(
+    mocker: MockerFixture,
+) -> None:
+    error = Exception("response failure")
+    error.response = SimpleNamespace(status_code=429)  # type: ignore[attr-defined]
+    backend = mocker.Mock()
+    backend.chat.completions.create.side_effect = [error, _response("ok")]
+    client = _client(backend, max_retry=1, sleep=mocker.Mock())
+
+    client.complete([])
+
+    assert backend.chat.completions.create.call_count == 2
+
+
 def test_openai_compat_client_with_import_failure_raises_llm_failed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

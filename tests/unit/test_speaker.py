@@ -1,6 +1,9 @@
 """Unit tests for speaker adapters and loop control."""
 
+import sys
+import threading
 import time
+import types
 
 import pytest
 
@@ -92,3 +95,97 @@ def test_pyttsx3_speaker_with_import_failure_disables_itself(
     speaker.speak("text")
 
     assert speaker._disabled is True
+
+
+def test_pyttsx3_speaker_with_fake_module_speaks_and_stops(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spoken: list[str] = []
+    started = threading.Event()
+    stopped = threading.Event()
+    release = threading.Event()
+
+    class FakeEngine:
+        def setProperty(self, _name: str, _value: object) -> None:
+            return None
+
+        def say(self, text: str) -> None:
+            spoken.append(text)
+
+        def runAndWait(self) -> None:
+            started.set()
+            release.wait(0.5)
+
+        def stop(self) -> None:
+            stopped.set()
+            release.set()
+
+    module = types.ModuleType("pyttsx3")
+    module.init = lambda: FakeEngine()
+    monkeypatch.setitem(sys.modules, "pyttsx3", module)
+    speaker = Pyttsx3Speaker()
+
+    speaker.speak("hello")
+    started.wait(0.5)
+    speaker.stop()
+
+    assert spoken == ["hello"] and stopped.is_set()
+
+
+def test_pyttsx3_speaker_with_say_failure_disables_after_first_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failed = threading.Event()
+    init_calls = 0
+
+    class FakeEngine:
+        def setProperty(self, _name: str, _value: object) -> None:
+            return None
+
+        def say(self, _text: str) -> None:
+            failed.set()
+            raise RuntimeError("say failed")
+
+        def runAndWait(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+    def init_engine() -> FakeEngine:
+        nonlocal init_calls
+        init_calls += 1
+        return FakeEngine()
+
+    module = types.ModuleType("pyttsx3")
+    module.init = init_engine
+    monkeypatch.setitem(sys.modules, "pyttsx3", module)
+    speaker = Pyttsx3Speaker()
+
+    speaker.speak("first")
+    failed.wait(0.5)
+    speaker.speak("second")
+    time.sleep(0.01)
+
+    assert speaker._disabled is True and init_calls == 1
+
+
+def test_loop_speaker_with_empty_text_and_tiny_interval_records_empty() -> None:
+    speaker = FakeSpeaker()
+    loop = LoopSpeaker(speaker, interval_s=0.001)
+
+    loop.start("")
+    time.sleep(0.01)
+    loop.stop()
+
+    assert len(speaker.spoken) >= 1 and all(text == "" for text in speaker.spoken)
+
+
+def test_loop_speaker_stop_then_start_again_stops_cleanly() -> None:
+    loop = LoopSpeaker(FakeSpeaker(), interval_s=0.001)
+    loop.start("first")
+    loop.stop()
+    loop.start("second")
+    loop.stop()
+
+    assert loop.is_running() is False

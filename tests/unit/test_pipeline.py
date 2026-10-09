@@ -6,6 +6,7 @@ import numpy as np
 from pytest_mock import MockerFixture
 
 from examchaiter.config import Settings
+from examchaiter.errors import CaptureError
 from examchaiter.llm.client import FakeLLMClient, LLMTimeout
 from examchaiter.models import OcrBlock
 from examchaiter.ocr.engine import FakeOcrEngine
@@ -119,6 +120,30 @@ def test_run_once_different_image_reuses_llm(mocker: MockerFixture) -> None:
     assert (
         first is not None and second is not None and second.reused is False and len(llm.calls) == 2
     )
+
+
+def test_run_once_empty_ocr_vision_timeout_returns_unknown(mocker: MockerFixture) -> None:
+    settings = Settings(_env_file=None, llm_vision_model="vision", min_text_len=1)
+    pipeline = _pipeline(
+        mocker,
+        ocr=FakeOcrEngine(blocks=[]),
+        llm=TimeoutLLM(),
+        settings=settings,
+    )
+
+    result = pipeline.run_once(1)
+
+    assert result is not None and result.answer.qtype.value == "unknown"
+
+
+def test_run_once_capture_exception_returns_none(mocker: MockerFixture) -> None:
+    capture = FakeCapture()
+    mocker.patch.object(capture, "get_window_rect", side_effect=CaptureError("rect failed"))
+    pipeline = _pipeline(mocker, capture=capture)
+
+    result = pipeline.run_once(1)
+
+    assert result is None
 
 
 def _pipeline(

@@ -224,3 +224,13 @@ def test_on_toggle_tts_swallows_speak_exception() -> None:
     app._on_toggle_tts()
 
     assert app._last_result is not None
+
+
+def test_build_pipeline_with_mocked_real_dependencies(mocker: MockerFixture) -> None:
+    mocker.patch.object(app_module, "RapidOcrEngine", return_value=mocker.Mock())
+    mocker.patch.object(app_module, "OpenAICompatClient", return_value=mocker.Mock())
+    pipeline_class = mocker.patch.object(app_module, "ExamPipeline", return_value=mocker.Mock())
+
+    result = app_module._build_pipeline(Settings(_env_file=None, llm_api_key="sk-test"))
+
+    assert pipeline_class.call_count == 1 and result is not None
