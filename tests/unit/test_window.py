@@ -140,3 +140,19 @@ def test_list_windows_command_with_windows_prints_handle(
     main(["list-windows"])
 
     assert "0x0000000A\tExam Window\t0,0,100,100" in capsys.readouterr().out
+
+
+def test_get_foreground_window_with_handle_returns_hwnd(mocker: MockerFixture) -> None:
+    mocker.patch.object(window_module.win32gui, "GetForegroundWindow", return_value=42)
+
+    assert window_module.get_foreground_window() == 42
+
+
+def test_get_foreground_window_with_exception_returns_none(mocker: MockerFixture) -> None:
+    mocker.patch.object(
+        window_module.win32gui,
+        "GetForegroundWindow",
+        side_effect=RuntimeError("foreground unavailable"),
+    )
+
+    assert window_module.get_foreground_window() is None

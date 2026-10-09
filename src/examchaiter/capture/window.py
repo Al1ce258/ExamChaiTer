@@ -89,3 +89,12 @@ def is_window_alive(hwnd: int) -> bool:
     """Return whether ``hwnd`` still identifies a live window."""
 
     return bool(win32gui.IsWindow(hwnd))
+
+
+def get_foreground_window() -> int | None:
+    """Return the current foreground window handle, or ``None`` on failure."""
+
+    try:
+        return win32gui.GetForegroundWindow() or None
+    except Exception:
+        return None
