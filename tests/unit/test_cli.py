@@ -55,3 +55,20 @@ def test_without_command_prints_available_commands(capsys: pytest.CaptureFixture
     main([])
 
     assert "show-config" in capsys.readouterr().out
+
+
+def test_ask_command_without_real_prints_choice(capsys: pytest.CaptureFixture[str]) -> None:
+    main(["ask", "1+1=?"])
+
+    assert capsys.readouterr().out == "qtype=choice\ncontent=B\n"
+
+
+def test_ask_command_with_real_without_key_exits_nonzero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("EXAMCHAITER_LLM_API_KEY", raising=False)
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(["ask", "1+1=?", "--real"])
+
+    assert exc_info.value.code != 0

@@ -19,6 +19,9 @@ def _build_parser() -> argparse.ArgumentParser:
     list_parser = subparsers.add_parser("list-windows", help="list visible top-level windows")
     list_parser.add_argument("--filter", default=None, help="regular expression for window titles")
     subparsers.add_parser("ocr-self-test", help="run the synthetic OCR smoke test")
+    ask_parser = subparsers.add_parser("ask", help="answer one question")
+    ask_parser.add_argument("question")
+    ask_parser.add_argument("--real", action="store_true", help="use the configured OpenAI client")
     subparsers.add_parser("show-config", help="print effective settings with secrets masked")
     return parser
 
@@ -65,6 +68,35 @@ def main(argv: Sequence[str] | None = None) -> int:
         ]
         cast(Any, sys.stdout).reconfigure(encoding="utf-8")
         print(blocks_to_text(FakeOcrEngine(blocks=blocks).recognize(image)))
+
+    if args.command == "ask":
+        from examchaiter.llm import (
+            FakeLLMClient,
+            LLMClient,
+            OpenAICompatClient,
+            build_messages,
+            parse_answer,
+        )
+
+        client: LLMClient
+
+        if args.real:
+            settings = Settings()
+            if settings.llm_api_key is None:
+                parser.error("--real requires EXAMCHAITER_LLM_API_KEY")
+            client = OpenAICompatClient(
+                base_url=settings.llm_base_url,
+                api_key=settings.llm_api_key.get_secret_value(),
+                model=settings.llm_model,
+                timeout=settings.llm_timeout_s,
+                max_retry=settings.llm_max_retry,
+            )
+        else:
+            client = FakeLLMClient(responses=['{"type":"choice","answer":"B"}'])
+
+        answer = parse_answer(client.complete(build_messages(args.question), json_mode=True))
+        print(f"qtype={answer.qtype.value}")
+        print(f"content={answer.content}")
 
     if args.command == "list-windows":
         from examchaiter.capture.window import list_windows
