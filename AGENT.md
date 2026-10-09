@@ -112,7 +112,7 @@ class ExamPipeline:
 - 运行时：`pywin32`、`mss`、`numpy`、`pillow`、`rapidocr-onnxruntime`、`openai`、`pydantic`、`pydantic-settings`、`pyttsx3`、`pynput`、`loguru`
 - Phase 8 起追加 `PySide6>=6.7`（GUI）
 - Phase 9 起追加 `PyInstaller>=6.10`（打包）
-- 开发：`pytest`、`pytest-mock`、`pytest-cov`、`ruff`、`mypy`、`types-pywin32`
+- 开发：`pytest`、`pytest-mock`、`pytest-cov`、`pytest-qt>=4.4`、`ruff`、`mypy`、`types-pywin32`
 
 除上述列表外禁止新增依赖。Phase 8 之前不得 import PySide6；Phase 9 之前不得 import PyInstaller。
 
@@ -209,6 +209,8 @@ class GuiController:
 | `tests/e2e`         | 真实 API + 真窗口         | 手动，默认跳过                 |
 
 ### 7.2 必用 Fixture（定义在 `tests/conftest.py`）
+GUI 测试分两层：GuiController 用 `tests/unit` 普通测试；Qt 控件用 `tests/integration` + pytest-qt 的 `qtbot`，标 `@pytest.mark.integration` 默认 skip；pytest 运行环境设 `QT_QPA_PLATFORM=offscreen`。
+
 ```python
 fake_capture      # 从 tests/fixtures/*.png 读 ndarray
 fake_ocr          # FakeOcrEngine(blocks=[...])
