@@ -22,7 +22,7 @@ def grab_rect(rect: tuple[int, int, int, int]) -> ImageArray:
 
     monitor = {"left": left, "top": top, "width": right - left, "height": bottom - top}
     try:
-        with mss.mss() as capture:
+        with mss.mss() as capture:  # pragma: no cover - real screen capture
             frame = np.array(capture.grab(monitor), dtype=np.uint8)
     except Exception as exc:
         raise CaptureError(f"Could not capture rectangle {rect}") from exc

@@ -67,7 +67,11 @@ class OpenAICompatClient:
     def _load_client(self) -> Any:
         try:
             module = importlib.import_module("openai")
-            return module.OpenAI(base_url=self.base_url, api_key=self.api_key, timeout=self.timeout)
+            return module.OpenAI(  # pragma: no cover - real network client
+                base_url=self.base_url,
+                api_key=self.api_key,
+                timeout=self.timeout,
+            )
         except Exception as exc:
             raise LLMFailed("OpenAI SDK is unavailable or could not be initialized") from exc
 

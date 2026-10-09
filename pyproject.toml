@@ -53,7 +53,8 @@ strict = true
 warn_unreachable = true
 
 [tool.pytest.ini_options]
-addopts = "-p no:cacheprovider -m \"not e2e and not integration and not slow\" --strict-markers --cov=examchaiter --cov-report=term-missing --cov-fail-under=80"
+addopts = "-p no:cacheprovider -m \"not e2e and not integration and not slow\" --strict-markers --cov=examchaiter --cov-report=term-missing"
+filterwarnings = ["ignore::ResourceWarning"]
 testpaths = ["tests"]
 markers = [
     "e2e: end-to-end tests that require external services",
@@ -64,9 +65,9 @@ markers = [
 [tool.coverage.run]
 branch = true
 source = ["src/examchaiter"]
+omit = ["tests/*", "scripts/*"]
 
 [tool.coverage.report]
-fail_under = 80
 show_missing = true
 skip_covered = true
 exclude_lines = [

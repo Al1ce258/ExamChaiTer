@@ -42,8 +42,8 @@ class RapidOcrEngine:
     def _load_engine() -> Any:
         try:
             module = importlib.import_module("rapidocr_onnxruntime")
-            rapid_ocr_class = module.RapidOCR
-            return rapid_ocr_class()
+            rapid_ocr_class = module.RapidOCR  # pragma: no cover - real OCR backend
+            return rapid_ocr_class()  # pragma: no cover - real OCR backend
         except Exception as exc:
             raise OcrFailed("RapidOCR is unavailable or could not be initialized") from exc
 
