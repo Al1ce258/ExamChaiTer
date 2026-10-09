@@ -8,7 +8,7 @@ from typing import Any, cast
 from loguru import logger
 
 from examchaiter.config import Settings
-from examchaiter.models import Answer
+from examchaiter.models import Answer, PipelineResult
 from examchaiter.output.formatter import to_display_text
 
 ClipboardWriter = Callable[[str], None]
@@ -27,7 +27,8 @@ class Presenter:
         self._clipboard_writer = _clipboard_writer
         self._printer = _printer
 
-    def show(self, answer: Answer) -> None:
+    def show(self, result: Answer | PipelineResult) -> None:
+        answer = result.answer if isinstance(result, PipelineResult) else result
         self._printer(to_display_text(answer))
         if not self.settings.clipboard:
             return

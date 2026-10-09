@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     clipboard: bool = False
     ocr_use_gpu: bool = False
     tts_interval_s: float = Field(default=3.0, gt=0.0)
+    tts_enabled: bool = True
     tts_rate: int = Field(default=180, ge=0)
     log_level: str = "INFO"
     debug_dir: Path = Path("debug")

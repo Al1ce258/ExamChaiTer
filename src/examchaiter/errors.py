@@ -33,5 +33,9 @@ class TtsError(ExamChaiTerError):
     """Raised when text-to-speech fails."""
 
 
+class HotkeyError(ExamChaiTerError):
+    """Raised when the global hotkey listener cannot be initialized."""
+
+
 class PipelineError(ExamChaiTerError):
     """Raised when the answer pipeline cannot complete."""
