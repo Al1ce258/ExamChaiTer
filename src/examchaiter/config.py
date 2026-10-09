@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     llm_model: str = "gpt-4o-mini"
     llm_timeout_s: float = Field(default=60.0, gt=0.0)
     llm_max_retry: int = Field(default=2, ge=0)
+    clipboard: bool = False
     ocr_use_gpu: bool = False
     tts_interval_s: float = Field(default=3.0, gt=0.0)
     tts_rate: int = Field(default=180, ge=0)
