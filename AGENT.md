@@ -243,7 +243,7 @@ settings          # 隔离的 Settings，全部默认值 + 可覆盖
 | 6     | 热键常驻   | app.py                                                       | 三个热键生效；异常不退出                                     |
 | 7     | 打磨       | README, e2e_smoke.py                                         | 三步跑通文档                                                 |
 | 8     | GUI | gui/*.py | 双击 main_window 能开窗；三按钮绑定 ExamPipeline / LoopSpeaker；托盘菜单可用；GUI 层零业务逻辑 |
-| 9     | 打包 exe | ExamChaiTer.spec + scripts/build.ps1 | 产物 ExamChaiTer.exe 双击打开主窗口；无控制台黑框；图标正常 |
+| 9     | 打包 exe | ExamChaiTer.spec + scripts/build.ps1 | 产物 dist/ExamChaiTer.exe 存在；双击打开主窗口；无控制台黑框；托盘图标与菜单可用；Ctrl+Alt+Q/S/X 生效（管理员权限下）；缺 API Key 时弹窗提示 |
 
 每个 Phase 结束打 tag：`v0.1.0-phase<N>`。
 
@@ -308,6 +308,8 @@ Tests: pytest tests/unit/test_xxx.py -q  (N passed)
 - 热键：Phase 8 起用 Qt QShortcut 取代 pynput
 - 控制台黑框：--noconsole / console=False
 - 杀软误报：不签名无法根治，告知用户加白名单
+- onefile 首次启动 5~10 秒解压，属正常，README 需注明
+- rapidocr 模型文件用 PyInstaller.utils.hooks.collect_data_files("rapidocr_onnxruntime") 收集，不要手写路径
 
 ---
 
