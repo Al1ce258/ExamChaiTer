@@ -34,6 +34,7 @@ dev = [
     "pytest-qt>=4.4",
     "ruff>=0.8",
     "mypy>=1.11",
+    "PyInstaller>=6.10",
     "types-pywin32>=306",
 ]
 
