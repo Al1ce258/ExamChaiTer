@@ -137,3 +137,42 @@ def test_list_windows_with_exception_returns_empty_list() -> None:
     )
 
     assert controller.list_windows() == []
+
+
+def test_pick_window_with_unknown_hwnd_returns_none() -> None:
+    controller, _pipeline, _loop, _presenter = _controller()
+
+    assert controller.pick_window(99) is None
+
+
+def test_answer_once_with_none_result_recovers_busy_state() -> None:
+    controller, _pipeline, _loop, _presenter = _controller(pipeline=FakePipeline(result=None))
+    controller.pick_window(1)
+
+    result = controller.answer_once()
+
+    assert result is None and controller.state.busy is False
+
+
+def test_toggle_tts_with_start_exception_returns_false() -> None:
+    class BrokenLoop(FakeLoopSpeaker):
+        def start(self, text: str) -> None:
+            raise RuntimeError(text)
+
+    controller, _pipeline, _loop, _presenter = _controller()
+    controller.loop_speaker = BrokenLoop()  # type: ignore[assignment]
+    controller.state.last_answer = Answer(qtype=QuestionType.CHOICE, content="B")
+
+    result = controller.toggle_tts()
+
+    assert result is False and controller.state.tts_running is False
+
+
+def test_stop_tts_is_idempotent_and_clears_state() -> None:
+    controller, _pipeline, loop, _presenter = _controller()
+    controller.state.tts_running = True
+
+    controller.stop_tts()
+    controller.stop_tts()
+
+    assert loop.stop_count == 2 and controller.is_tts_running() is False

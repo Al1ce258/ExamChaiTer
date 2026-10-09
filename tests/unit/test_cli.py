@@ -94,6 +94,12 @@ def test_run_dry_run_prints_hotkey_bindings(capsys: pytest.CaptureFixture[str]) 
     assert "<ctrl>+<alt>+q" in capsys.readouterr().out
 
 
+def test_gui_fake_command_prints_ok(capsys: pytest.CaptureFixture[str]) -> None:
+    result = main(["gui", "--fake"])
+
+    assert result == 0 and "gui-ok" in capsys.readouterr().out
+
+
 def test_list_windows_command_smoke(mocker: MockerFixture) -> None:
     mocker.patch("examchaiter.capture.window.list_windows", return_value=[])
 

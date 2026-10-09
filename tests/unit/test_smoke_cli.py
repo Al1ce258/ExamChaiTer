@@ -11,6 +11,7 @@ SUBCOMMANDS = [
     "ask",
     "answer",
     "speak",
+    "gui",
     "run",
 ]
 

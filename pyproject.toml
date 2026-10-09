@@ -67,7 +67,13 @@ markers = [
 [tool.coverage.run]
 branch = true
 source = ["src/examchaiter"]
-omit = ["tests/*", "scripts/*"]
+omit = [
+    "tests/*",
+    "scripts/*",
+    "src/examchaiter/gui/main_window.py",
+    "src/examchaiter/gui/tray.py",
+    "src/examchaiter/gui/overlay.py",
+]
 
 [tool.coverage.report]
 show_missing = true

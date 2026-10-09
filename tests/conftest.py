@@ -1,5 +1,9 @@
 """Offline fake fixtures shared by unit tests."""
 
+import os
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
 from dataclasses import dataclass, field
 
 import numpy as np

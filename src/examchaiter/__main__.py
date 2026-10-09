@@ -32,6 +32,8 @@ def _build_parser() -> argparse.ArgumentParser:
     speak_parser.add_argument("--real", action="store_true", help="use pyttsx3")
     run_parser = subparsers.add_parser("run", help="start the global-hotkey app")
     run_parser.add_argument("--dry-run", action="store_true", help="print bindings without running")
+    gui_parser = subparsers.add_parser("gui", help="start the PySide6 GUI")
+    gui_parser.add_argument("--fake", action="store_true", help="construct GUI without event loop")
     subparsers.add_parser("show-config", help="print effective settings with secrets masked")
     return parser
 
@@ -258,6 +260,59 @@ def main(argv: Sequence[str] | None = None) -> int:
         if exit_code != 0:
             print("ERROR: application failed to start", file=sys.stderr)
         return exit_code
+
+    if args.command == "gui":
+        import sys
+        from typing import Any, cast
+
+        try:
+            from PySide6.QtWidgets import QApplication
+        except Exception as exc:
+            print(f"ERROR: PySide6 is unavailable: {exc}", file=sys.stderr)
+            return 1
+
+        from examchaiter.app import _build_pipeline
+        from examchaiter.gui.main_window import MainWindow
+        from examchaiter.gui.state import GuiController
+        from examchaiter.gui.tray import TrayController
+        from examchaiter.models import PipelineResult
+        from examchaiter.output import Presenter
+        from examchaiter.tts import FakeSpeaker, LoopSpeaker, Pyttsx3Speaker
+
+        settings = Settings()
+        argv = ["-platform", "offscreen"] if args.fake else sys.argv
+        instance = QApplication.instance()
+        qapp = cast(QApplication, instance) if instance is not None else QApplication(argv)
+
+        if args.fake:
+
+            class GuiSmokePipeline:
+                def run_once(self, _hwnd: int) -> PipelineResult | None:
+                    return None
+
+            controller = GuiController(
+                pipeline_factory=lambda: cast(Any, GuiSmokePipeline()),
+                loop_speaker=LoopSpeaker(FakeSpeaker()),
+                presenter=Presenter(settings, _printer=lambda _text: None),
+                settings=settings,
+                _list_windows_fn=lambda _title: [],
+            )
+        else:
+            controller = GuiController(
+                pipeline_factory=lambda: _build_pipeline(settings),
+                loop_speaker=LoopSpeaker(Pyttsx3Speaker(rate=settings.tts_rate)),
+                presenter=Presenter(settings),
+                settings=settings,
+            )
+
+        main_window = MainWindow(controller, settings)
+        _tray = TrayController(qapp, main_window, controller)
+        if args.fake:
+            print("gui-ok")
+            return 0
+
+        main_window.show()
+        return int(qapp.exec())
 
     if args.command == "list-windows":
         from examchaiter.capture.window import list_windows

@@ -1,6 +1,6 @@
 # ExamChaiTer
 
-**状态：Phase 7 完成，后端可用。**
+**状态：Phase 8 完成，GUI 可用。**
 
 ExamChaiTer 是一个 Windows 本地工具：聚焦指定窗口 -> 截图 -> OCR -> 调用
 OpenAI 兼容接口 -> 仅输出答案 -> 可选循环语音朗读。
@@ -95,6 +95,13 @@ uv run python -m examchaiter run --dry-run
 uv run python -m examchaiter run
 ```
 
+启动 PySide6 主窗口与托盘：
+
+```powershell
+uv run python -m examchaiter gui --fake
+uv run python -m examchaiter gui
+```
+
 ## 开发
 
 格式化、静态检查和 90% 覆盖率门槛：
@@ -130,7 +137,7 @@ uv run python tests/fixtures/gen_sample.py
 
 ## 已知限制
 
-- Phase 8 GUI 与 Phase 9 打包尚未完成。
+- Phase 9 打包尚未完成。
 - pynput 在部分 Windows 环境中需要管理员权限。
 - 真实 OCR 模型、真实 LLM、真实 TTS 和真实窗口交互由本地手动联调。
 - e2e 默认跳过，仓库不会在测试中发起真实 API 请求。
