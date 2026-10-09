@@ -1,6 +1,7 @@
 """Unit tests for application orchestration."""
 
 import pytest
+from pytest_mock import MockerFixture
 
 from examchaiter import app as app_module
 from examchaiter.app import ExamChaiTerApp, FakeHotkeyListener, PynputHotkeyListener
@@ -151,3 +152,75 @@ def test_stop_is_idempotent() -> None:
     app.stop()
 
     assert app.stop() is None
+
+
+def test_app_without_pipeline_uses_built_pipeline(mocker: MockerFixture) -> None:
+    fake_pipeline = FakePipeline(result=_result())
+    build = mocker.patch.object(app_module, "_build_pipeline", return_value=fake_pipeline)
+    app = ExamChaiTerApp(
+        settings=Settings(_env_file=None),
+        loop_speaker=LoopSpeaker(FakeSpeaker()),
+        presenter=FakePresenter(),
+        hotkey_factory=lambda _bindings: FakeHotkeyListener({}),
+    )
+
+    assert build.call_count == 1 and app.pipeline is fake_pipeline
+
+
+def test_app_without_loop_speaker_builds_loop(mocker: MockerFixture) -> None:
+    fake_loop = mocker.Mock()
+    build = mocker.patch.object(app_module, "LoopSpeaker", return_value=fake_loop)
+    mocker.patch.object(app_module, "Pyttsx3Speaker", return_value=mocker.Mock())
+    app = ExamChaiTerApp(
+        settings=Settings(_env_file=None, tts_enabled=True),
+        pipeline=FakePipeline(result=_result()),
+        presenter=FakePresenter(),
+        hotkey_factory=lambda _bindings: FakeHotkeyListener({}),
+    )
+
+    assert build.call_count == 1 and app.loop_speaker is fake_loop
+
+
+def test_on_answer_swallows_foreground_window_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pipeline = FakePipeline(result=_result())
+    app = _app(pipeline=pipeline)
+
+    def fail_foreground() -> int:
+        raise RuntimeError("foreground failed")
+
+    monkeypatch.setattr(app_module, "get_foreground_window", fail_foreground)
+
+    app._on_answer()
+
+    assert pipeline.calls == []
+
+
+def test_on_toggle_tts_swallows_speak_exception() -> None:
+    class RaisingSpeaker:
+        def speak(self, _text: str) -> None:
+            raise RuntimeError("speech failed")
+
+        def stop(self) -> None:
+            return None
+
+    class RaisingLoop:
+        def __init__(self) -> None:
+            self.speaker = RaisingSpeaker()
+
+        def is_running(self) -> bool:
+            return False
+
+        def start(self, text: str) -> None:
+            self.speaker.speak(text)
+
+        def stop(self) -> None:
+            return None
+
+    app = _app(loop_speaker=RaisingLoop())  # type: ignore[arg-type]
+    app._last_result = _result()
+
+    app._on_toggle_tts()
+
+    assert app._last_result is not None

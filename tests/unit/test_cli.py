@@ -1,8 +1,10 @@
 """Unit tests for the offline command-line entry point."""
 
 import pytest
+from pytest_mock import MockerFixture
 
 from examchaiter.__main__ import main
+from examchaiter.config import Settings
 
 
 def test_version_option_exits_with_success() -> None:
@@ -90,3 +92,45 @@ def test_run_dry_run_prints_hotkey_bindings(capsys: pytest.CaptureFixture[str]) 
     main(["run", "--dry-run"])
 
     assert "<ctrl>+<alt>+q" in capsys.readouterr().out
+
+
+def test_list_windows_command_smoke(mocker: MockerFixture) -> None:
+    mocker.patch("examchaiter.capture.window.list_windows", return_value=[])
+
+    assert main(["list-windows", "--filter", ".*"]) == 0
+
+
+def test_ocr_self_test_command_smoke(capsys: pytest.CaptureFixture[str]) -> None:
+    main(["ocr-self-test"])
+
+    assert "第一行 题目示例" in capsys.readouterr().out
+
+
+def test_ask_real_without_key_writes_stderr(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv("EXAMCHAITER_LLM_API_KEY", raising=False)
+
+    with pytest.raises(SystemExit):
+        main(["ask", "1+1=?", "--real"])
+
+    assert "EXAMCHAITER_LLM_API_KEY" in capsys.readouterr().err
+
+
+def test_answer_real_with_missing_window_exits_nonzero(mocker: MockerFixture) -> None:
+    mocker.patch(
+        "examchaiter.__main__.Settings",
+        return_value=Settings(_env_file=None, llm_api_key="sk-test"),
+    )
+    mocker.patch("examchaiter.capture.window.find_window", return_value=None)
+
+    assert main(["answer", "--title", "missing", "--real"]) != 0
+
+
+def test_speak_real_with_import_failure_exits_nonzero(mocker: MockerFixture) -> None:
+    mocker.patch(
+        "examchaiter.tts.speaker.importlib.import_module",
+        side_effect=ImportError("pyttsx3 unavailable"),
+    )
+
+    assert main(["speak", "text", "--real"]) != 0
