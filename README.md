@@ -1,6 +1,6 @@
 # ExamChaiTer
 
-**状态：Phase 8 完成，GUI 可用。**
+**状态：Phase 9 完成，exe 可分发。**
 
 ExamChaiTer 是一个 Windows 本地工具：聚焦指定窗口 -> 截图 -> OCR -> 调用
 OpenAI 兼容接口 -> 仅输出答案 -> 可选循环语音朗读。
@@ -29,6 +29,15 @@ uv run python -m examchaiter run
 ```
 
 `.env`、`debug/`、`logs/`、真实考试截图、模型权重和 API Key 都不得提交。
+
+## 打包为 exe
+
+1. 安装依赖后执行 `powershell -ExecutionPolicy Bypass -File scripts/build.ps1`。
+2. 产物位于 `dist/ExamChaiTer.exe`。
+3. onefile 首次启动需解压 5~10 秒，之后正常。
+4. 建议右键“以管理员身份运行”，否则 `Ctrl+Alt+Q/S/X` 可能无法注册。
+5. 杀软可能误报；加入白名单即可，未签名无法根治。
+6. 双击启动后默认打开 GUI 主窗口。
 
 ## 热键
 
@@ -123,8 +132,8 @@ uv run pytest -q -m e2e
 
 ## 打包
 
-Phase 9 尚未完成。后续将使用 `ExamChaiTer.spec` 与 `scripts/build.ps1` 构建
-无控制台窗口的 `ExamChaiTer.exe`；当前 README 的 exe 步骤只是占位。
+项目使用 `ExamChaiTer.spec` 构建无控制台窗口的单文件 `ExamChaiTer.exe`。
+构建完成后可用 `scripts/verify_exe.py` 做本机存活冒烟；该脚本不进入 CI。
 
 ## 测试素材
 
@@ -137,7 +146,7 @@ uv run python tests/fixtures/gen_sample.py
 
 ## 已知限制
 
-- Phase 9 打包尚未完成。
+- Phase 9 已完成：`dist/ExamChaiTer.exe` 可用，但需自备 LLM API Key。
 - pynput 在部分 Windows 环境中需要管理员权限。
 - 真实 OCR 模型、真实 LLM、真实 TTS 和真实窗口交互由本地手动联调。
 - e2e 默认跳过，仓库不会在测试中发起真实 API 请求。
