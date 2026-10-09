@@ -72,3 +72,9 @@ def test_ask_command_with_real_without_key_exits_nonzero(
         main(["ask", "1+1=?", "--real"])
 
     assert exc_info.value.code != 0
+
+
+def test_answer_command_without_real_prints_display(capsys: pytest.CaptureFixture[str]) -> None:
+    main(["answer", "--title", "任意"])
+
+    assert capsys.readouterr().out == "答案：B\n"

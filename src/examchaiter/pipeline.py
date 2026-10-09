@@ -112,7 +112,7 @@ class ExamPipeline:
             self._last_question = question_text
             self._last_answer = answer
             latency_ms = (self._clock() - started_at) * 1000.0
-            logger.debug("Pipeline completed in {:.1f} ms", latency_ms)
+            logger.trace("Pipeline completed in {:.1f} ms", latency_ms)
             return PipelineResult(answer=answer, reused=False)
         except Exception:
             logger.exception("Pipeline failed for hwnd={}", hwnd)

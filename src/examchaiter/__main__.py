@@ -22,6 +22,9 @@ def _build_parser() -> argparse.ArgumentParser:
     ask_parser = subparsers.add_parser("ask", help="answer one question")
     ask_parser.add_argument("question")
     ask_parser.add_argument("--real", action="store_true", help="use the configured OpenAI client")
+    answer_parser = subparsers.add_parser("answer", help="run one answer pipeline")
+    answer_parser.add_argument("--title", required=True, help="target window title pattern")
+    answer_parser.add_argument("--real", action="store_true", help="use real capture, OCR, and LLM")
     subparsers.add_parser("show-config", help="print effective settings with secrets masked")
     return parser
 
@@ -97,6 +100,86 @@ def main(argv: Sequence[str] | None = None) -> int:
         answer = parse_answer(client.complete(build_messages(args.question), json_mode=True))
         print(f"qtype={answer.qtype.value}")
         print(f"content={answer.content}")
+
+    if args.command == "answer":
+        import sys
+        import time
+        from types import SimpleNamespace
+
+        import numpy as np
+
+        from examchaiter.capture.screenshot import grab_window
+        from examchaiter.capture.window import (
+            find_window,
+            focus_window,
+            get_window_rect,
+            is_window_alive,
+        )
+        from examchaiter.llm.client import FakeLLMClient, LLMClient, OpenAICompatClient
+        from examchaiter.models import OcrBlock
+        from examchaiter.ocr.engine import FakeOcrEngine, OcrEngine, RapidOcrEngine
+        from examchaiter.output import Presenter
+        from examchaiter.pipeline import Capture, ExamPipeline
+
+        settings = Settings()
+        hwnd = 1
+        capture: Capture
+        ocr: OcrEngine
+        llm: LLMClient
+
+        if args.real:
+            if settings.llm_api_key is None:
+                print("ERROR: --real requires EXAMCHAITER_LLM_API_KEY", file=sys.stderr)
+                return 1
+            target = find_window(args.title)
+            if target is None:
+                print(f"ERROR: window not found: {args.title}", file=sys.stderr)
+                return 1
+            hwnd = target.hwnd
+            capture = SimpleNamespace(
+                get_window_rect=get_window_rect,
+                is_window_alive=is_window_alive,
+                focus_window=focus_window,
+                grab_window=grab_window,
+            )
+            ocr = RapidOcrEngine()
+            llm = OpenAICompatClient(
+                base_url=settings.llm_base_url,
+                api_key=settings.llm_api_key.get_secret_value(),
+                model=settings.llm_model,
+                timeout=settings.llm_timeout_s,
+                max_retry=settings.llm_max_retry,
+            )
+        else:
+            white_image = np.full((100, 100, 3), 255, dtype=np.uint8)
+            capture = SimpleNamespace(
+                get_window_rect=lambda _hwnd: (0, 0, 100, 100),
+                is_window_alive=lambda _hwnd: True,
+                focus_window=lambda _hwnd: True,
+                grab_window=lambda _hwnd: white_image.copy(),
+            )
+            ocr = FakeOcrEngine(
+                blocks=[
+                    OcrBlock(text="示例题目 1+1=?", bbox=(0.0, 0.0, 180.0, 20.0), confidence=0.99)
+                ]
+            )
+            llm = FakeLLMClient(responses=['{"type":"choice","answer":"B"}'])
+
+        pipeline = ExamPipeline(
+            capture=capture,
+            ocr=ocr,
+            llm=llm,
+            settings=settings,
+            _sleep=time.sleep if args.real else lambda _delay: None,
+        )
+        result = pipeline.run_once(hwnd)
+        if result is None:
+            print(f"ERROR: could not process window: {args.title}", file=sys.stderr)
+            return 1
+        reconfigure = getattr(sys.stdout, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8")
+        Presenter(settings, _printer=print).show(result.answer)
 
     if args.command == "list-windows":
         from examchaiter.capture.window import list_windows
