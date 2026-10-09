@@ -15,7 +15,7 @@
 
 | #    | 禁止事项                                                     |
 | ---- | ------------------------------------------------------------ |
-| N1   | 新增任何未在 `DEV_SPEC.md` §2 列出的第三方依赖               |
+| N1   | 新增任何未在 `AGENT.md` §4.1 列出的第三方依赖               |
 | N2   | 修改 `tests/` 下**已有的断言**（除非任务显式要求，且单独一个 commit） |
 | N3   | 修改公开接口签名（`models.py` / 各模块 Protocol）而不先更新 `DEV_SPEC.md` |
 | N4   | 修改目录结构                                                 |
@@ -27,6 +27,8 @@
 | N10  | `git commit -am` / `--no-verify` / 跳过 pre-commit           |
 | N11  | 用 `...省略...`、`# 其余不变` 之类偷懒占位替代完整代码       |
 | N12  | 一次任务跨越多个 Phase                                       |
+
+**N1 例外**：Phase 8 起允许使用 PySide6，Phase 9 起允许使用 PyInstaller；其余依赖仍禁止新增。
 
 ---
 
@@ -105,6 +107,15 @@ class ExamPipeline:
 
 **必须存在 Fake 实现**：`FakeLLMClient`、`FakeOcrEngine`、`FakeSpeaker`、`FakeCapture`。没有 Fake 的模块不允许写单测。
 
+### 4.1 允许的第三方依赖白名单
+
+- 运行时：`pywin32`、`mss`、`numpy`、`pillow`、`rapidocr-onnxruntime`、`openai`、`pydantic`、`pydantic-settings`、`pyttsx3`、`pynput`、`loguru`
+- Phase 8 起追加 `PySide6>=6.7`（GUI）
+- Phase 9 起追加 `PyInstaller>=6.10`（打包）
+- 开发：`pytest`、`pytest-mock`、`pytest-cov`、`ruff`、`mypy`、`types-pywin32`
+
+除上述列表外禁止新增依赖。Phase 8 之前不得 import PySide6；Phase 9 之前不得 import PyInstaller。
+
 ---
 
 ## 5. 项目结构与文件职责速查
@@ -127,8 +138,15 @@ src/examchaiter/
 │   ├─ formatter.py to_display_text / to_speech_text
 │   └─ presenter.py 控制台打印 + 写剪贴板
 ├─ tts/speaker.py   Speaker(Protocol) + Pyttsx3Speaker + FakeSpeaker + LoopSpeaker
+├─ gui/
+│   ├─ __init__.py
+│   ├─ main_window.py
+│   ├─ tray.py
+│   ├─ overlay.py
+│   └─ state.py
 ├─ pipeline.py      ExamPipeline.run_once() -> PipelineResult | None
 └─ app.py           ExamChaiTerApp（pynput 热键 + 主循环）
+ExamChaiTer.spec（仓库根）
 ```
 
 **改动前先确认目标文件已存在于上述结构**；不存在说明跨 Phase，需停下反问。
@@ -158,7 +176,22 @@ LoopSpeaker(speaker: Speaker, interval_s: float = 3.0)
 Ctrl+Alt+Q  作答一次
 Ctrl+Alt+S  停/续循环朗读
 Ctrl+Alt+X  退出
+
+# gui/main_window.py
+class MainWindow(QMainWindow):
+    def __init__(self,
+                 pipeline_factory: Callable[[], ExamPipeline],
+                 loop_speaker: LoopSpeaker,
+                 settings: Settings) -> None: ...
+
+# gui/state.py  ← GUI 测试只测这里
+class GuiController:
+    def pick_window(self, title_filter: str) -> WindowInfo | None: ...
+    def answer_once(self) -> Answer | None: ...
+    def toggle_tts(self) -> bool: ...
 ```
+
+**GUI 铁律**：GUI 文件内禁止直接 new OpenAICompatClient / RapidOcrEngine / win32gui 等具体实现，全部从 MainWindow.__init__ 注入。
 
 ---
 
@@ -203,6 +236,8 @@ settings          # 隔离的 Settings，全部默认值 + 可覆盖
 | 5     | 循环朗读   | tts/speaker.py                                               | `LoopSpeaker` 循环且可停；切题自动换内容                     |
 | 6     | 热键常驻   | app.py                                                       | 三个热键生效；异常不退出                                     |
 | 7     | 打磨       | README, e2e_smoke.py                                         | 三步跑通文档                                                 |
+| 8     | GUI | gui/*.py | 双击 main_window 能开窗；三按钮绑定 ExamPipeline / LoopSpeaker；托盘菜单可用；GUI 层零业务逻辑 |
+| 9     | 打包 exe | ExamChaiTer.spec + scripts/build.ps1 | 产物 ExamChaiTer.exe 双击打开主窗口；无控制台黑框；图标正常 |
 
 每个 Phase 结束打 tag：`v0.1.0-phase<N>`。
 
@@ -258,6 +293,15 @@ Tests: pytest tests/unit/test_xxx.py -q  (N passed)
 - [ ] 我是否跨 Phase 了？
 - [ ] 我的代码块是否完整，没有 `...省略...`？
 - [ ] 我是否给出了可执行的验证命令和 commit message？
+
+### Phase 9 打包坑清单
+
+- PySide6 体积：--exclude-module PySide6.QtWebEngine* 等
+- rapidocr 模型：--add-data 显式带 rapidocr_onnxruntime/models/*
+- pyttsx3：懒加载，失败降级静默
+- 热键：Phase 8 起用 Qt QShortcut 取代 pynput
+- 控制台黑框：--noconsole / console=False
+- 杀软误报：不签名无法根治，告知用户加白名单
 
 ---
 
