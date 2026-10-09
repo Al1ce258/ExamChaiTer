@@ -310,6 +310,7 @@ Tests: pytest tests/unit/test_xxx.py -q  (N passed)
 - 杀软误报：不签名无法根治，告知用户加白名单
 - onefile 首次启动 5~10 秒解压，属正常，README 需注明
 - rapidocr 模型文件用 PyInstaller.utils.hooks.collect_data_files("rapidocr_onnxruntime") 收集，不要手写路径
+- 所有延迟 import 的第三方包（openai / pyttsx3 等）必须在 spec 的 hiddenimports 用 collect_submodules 显式收集，否则 exe 启动时 ModuleNotFoundError
 
 ---
 

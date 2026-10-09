@@ -9,6 +9,14 @@ from examchaiter.__main__ import main
 from examchaiter.config import Settings
 
 
+@pytest.fixture(autouse=True)
+def _isolate_cli_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "examchaiter.__main__.Settings",
+        lambda: Settings(_env_file=None),
+    )
+
+
 def test_version_option_exits_with_success() -> None:
     with pytest.raises(SystemExit) as exc_info:
         main(["--version"])

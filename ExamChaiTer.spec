@@ -9,6 +9,8 @@ datas = [
 
 hiddenimports = [
     *collect_submodules("rapidocr_onnxruntime"),
+    *collect_submodules("openai"),
+    *collect_submodules("pyttsx3"),
     "win32com",
     "win32com.client",
     "pythoncom",
