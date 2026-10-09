@@ -43,6 +43,12 @@ def test_run_once_happy_path_returns_choice(mocker: MockerFixture) -> None:
     assert result is not None and result.reused is False and result.answer.content == "B"
 
 
+def test_run_once_returns_question_text(mocker: MockerFixture) -> None:
+    result = _pipeline(mocker).run_once(1)
+
+    assert result is not None and result.question.text == "示例题目 1+1=?"
+
+
 def test_run_once_dedup_hit_skips_llm(mocker: MockerFixture) -> None:
     llm = FakeLLMClient(responses=['{"type":"choice","answer":"B"}'])
     pipeline = _pipeline(mocker, llm=llm)

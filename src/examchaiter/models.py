@@ -52,5 +52,6 @@ class Answer(_FrozenModel):
 class PipelineResult(_FrozenModel):
     """One pipeline result and whether it was reused without calling the LLM."""
 
+    question: Question
     answer: Answer
     reused: bool = False

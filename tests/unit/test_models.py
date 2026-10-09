@@ -59,13 +59,20 @@ def test_answer_with_choice_type_preserves_content() -> None:
 
 
 def test_pipeline_result_without_reuse_defaults_to_false() -> None:
-    result = PipelineResult(answer=Answer(qtype=QuestionType.FILL, content="42"))
+    result = PipelineResult(
+        question=Question(text="Question"),
+        answer=Answer(qtype=QuestionType.FILL, content="42"),
+    )
 
     assert result.reused is False
 
 
 def test_pipeline_result_with_reuse_stores_true() -> None:
-    result = PipelineResult(answer=Answer(qtype=QuestionType.SHORT, content="answer"), reused=True)
+    result = PipelineResult(
+        question=Question(text="Question"),
+        answer=Answer(qtype=QuestionType.SHORT, content="answer"),
+        reused=True,
+    )
 
     assert result.reused is True
 

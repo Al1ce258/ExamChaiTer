@@ -16,7 +16,7 @@ from examchaiter.capture.screenshot import dhash, hamming
 from examchaiter.config import Settings
 from examchaiter.llm.client import LLMClient, LLMFailed, LLMTimeout
 from examchaiter.llm.prompts import build_messages, parse_answer
-from examchaiter.models import Answer, PipelineResult, QuestionType
+from examchaiter.models import Answer, PipelineResult, Question, QuestionType
 from examchaiter.ocr.engine import OcrEngine
 from examchaiter.ocr.layout import blocks_to_text
 
@@ -55,8 +55,7 @@ class ExamPipeline:
         self._clock = _clock or time.monotonic
         self._sleep = _sleep
         self._last_hash: int | None = None
-        self._last_question = ""
-        self._last_answer: Answer | None = None
+        self._last_result: PipelineResult | None = None
 
     def run_once(self, hwnd: int) -> PipelineResult | None:
         """Run the pipeline once and absorb expected integration failures."""
@@ -82,20 +81,29 @@ class ExamPipeline:
 
             if (
                 self._last_hash is not None
-                and self._last_answer is not None
+                and self._last_result is not None
                 and hamming(image_hash, self._last_hash) <= self.settings.dedup_threshold
             ):
-                return PipelineResult(answer=self._last_answer, reused=True)
+                return PipelineResult(
+                    question=self._last_result.question,
+                    answer=self._last_result.answer,
+                    reused=True,
+                )
 
             blocks = self.ocr.recognize(image)
             question_text = blocks_to_text(blocks)
 
             if len(question_text) >= self.settings.min_text_len:
+                question = Question(text=question_text)
                 messages = build_messages(question_text)
             elif self.settings.llm_vision_model:
-                messages = build_messages(question_text, images=[_png_bytes(image)])
+                image_bytes = _png_bytes(image)
+                question = Question(text=question_text, images=(image_bytes,))
+                messages = build_messages(question_text, images=[image_bytes])
             else:
+                question = Question(text=question_text)
                 return PipelineResult(
+                    question=question,
                     answer=Answer(qtype=QuestionType.UNKNOWN, content="未识别到文字"),
                     reused=False,
                 )
@@ -109,11 +117,11 @@ class ExamPipeline:
                 answer = parse_answer(raw)
 
             self._last_hash = image_hash
-            self._last_question = question_text
-            self._last_answer = answer
+            result = PipelineResult(question=question, answer=answer, reused=False)
+            self._last_result = result
             latency_ms = (self._clock() - started_at) * 1000.0
             logger.trace("Pipeline completed in {:.1f} ms", latency_ms)
-            return PipelineResult(answer=answer, reused=False)
+            return result
         except Exception:
             logger.exception("Pipeline failed for hwnd={}", hwnd)
             return None
