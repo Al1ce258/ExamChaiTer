@@ -1,6 +1,6 @@
 # ExamChaiTer
 
-**状态：v0.3.0 Phase 14 完成，多题顺序朗读就绪（exe 打包为实验性，见下方说明）**
+**状态：v0.3.0 完成，支持多题识别、按题号顺序朗读、题号级缓存（exe 打包为实验性，见下方说明）**
 
 ExamChaiTer 是一个 Windows 本地工具：聚焦指定窗口 -> 截图 -> OCR -> 调用
 OpenAI 兼容接口 -> 仅输出答案 -> 可选循环语音朗读。
@@ -34,13 +34,24 @@ OpenAI 兼容接口 -> 仅输出答案 -> 可选循环语音朗读。
 - 历史按钮：查看每场考试记录，支持搜索与删除 session
 - 自动模式：勾选后循环识别→作答→朗读，题目变化自动切换，再点停止
 
+## 多题识别
+
+- 一帧内多道题自动拆分（正则可配，默认 4 条规则，见 `split_patterns`）
+- 每题独立作答、独立缓存（缓存键 = sha256(题号 + 归一化题干)）
+- 自动模式按题号顺序朗读：题 1 N 遍 → 题 2 N 遍 → …
+- 多选题答案显示为 `A B D`，朗读为“答案是 A、B、D”
+
 ## 配置文件位置
 
 `%APPDATA%\ExamChaiTer\config.json`，API Key 用 DPAPI 加密存储。
 
+主要配置项：`split_patterns`（拆题正则数组，高级用户可自定义）、`auto_speak_multi_choice_repeat`（多选朗读次数，默认 5）。
+
 ## 历史文件位置
 
 `%APPDATA%\ExamChaiTer\sessions\*.json`（汇总在 `index.json`）。
+
+每条记录含 `question_no`，按题目出现顺序排列（session JSON 为 schema v2 的 `entries` 列表）。
 
 ## 推荐启动方式
 
