@@ -181,7 +181,10 @@ build_messages(question_text: str, images: list[bytes] | None = None) -> list[di
 
 # ---- tts ----
 LoopSpeaker(speaker: Speaker, interval_s: float = 3.0)
-    .start(text) / .stop() / .is_running() -> bool
+    .start(text, max_repeats: int | None = None) / .stop() / .is_running() -> bool
+    # max_repeats=None → 无限循环（保持现有语义，既有测试不改）
+    # max_repeats=N    → 朗读 N 遍后线程自行退出，is_running() 变 False
+    # 二次 start 先 stop 旧线程再起新线程
 
 # ---- 热键 ----
 Ctrl+Alt+Q  作答一次
@@ -282,7 +285,7 @@ class HistoryStore:
     def load_session(self, session_id: str) -> dict[str, HistoryEntry]
         # 返回 {question_hash: entry}
     def find_by_hash(self, session_id: str, qhash: str) -> HistoryEntry | None
-    def add_entry(self, session_id: str, entry: HistoryEntry) -> None
+    def add_entry(self, session_id: str, entry: HistoryEntry, *, flush_now: bool = False) -> None
         # 已存在同 hash → 更新（覆盖），不新增
     def rename_session(self, session_id: str, new_name: str) -> bool
     def delete_session(self, session_id: str) -> bool
@@ -290,6 +293,84 @@ class HistoryStore:
         # 跨 session 搜索 question_text 包含 keyword 的条目
         # 返回 [(session_id, entry), ...]
     # 禁止存截图；HistoryEntry 不含任何图像字段
+```
+
+```python
+# ---- autopilot.py（纯逻辑，不依赖 Qt；用回调通知外部）----
+from enum import Enum
+class AutoPilotState(str, Enum):
+    IDLE = "idle"
+    RUNNING = "running"
+    STOPPING = "stopping"
+    STOPPED = "stopped"
+    ERROR = "error"
+
+@dataclass
+class AutoPilotConfig:
+    poll_interval: float = 1.5
+    stable_frames: int = 2
+    speak_choice_repeat: int = 5
+    speak_fill_repeat: int = 3
+    speak_short_repeat: int = 1
+    speak_interval: float = 3.0
+    min_text_len: int = 20
+
+@dataclass
+class AutoPilotCallbacks:
+    on_state: Callable[[AutoPilotState], None]
+    on_answer: Callable[[PipelineResult, bool], None]   # (result, from_cache)
+    on_status: Callable[[str], None]
+    on_error: Callable[[Exception], None]
+
+class AutoPilot:
+    def __init__(
+        self,
+        capture,            # 需提供 grab_window(hwnd) 与 dhash(img)
+        ocr,                # OcrEngine
+        llm,                # LLMClient
+        loop_speaker,       # LoopSpeaker
+        history_store,      # HistoryStore
+        session_id: str,
+        config: AutoPilotConfig,
+        callbacks: AutoPilotCallbacks,
+        *,
+        _sleep: Callable[[float], None] | None = None,  # 测试注入
+    ) -> None
+    def start(self, hwnd: int) -> None          # 非阻塞，起工作线程
+    def stop(self, timeout: float = 2.0) -> None  # 幂等
+    def is_running(self) -> bool
+    @property
+    def state(self) -> AutoPilotState
+
+# 状态机（一轮循环）：
+#   1. img = capture.grab_window(hwnd)；失败 → on_error + 继续
+#   2. h = dhash(img)；与 last_hash 对比：
+#        相似 → stable_count += 1
+#        不同 → stable_count = 0；last_hash = h；has_answered_this_frame = False
+#   3. if stable_count >= stable_frames and not has_answered_this_frame：
+#         text = blocks_to_text(ocr.recognize(img))
+#         if len(text) < min_text_len → 跳过本轮
+#         qhash = question_hash(text)
+#         entry = history.find_by_hash(session_id, qhash)
+#         if entry：
+#             answer = Answer(qtype=QuestionType(entry.answer_qtype), content=entry.answer_content)
+#             from_cache = True；on_status("缓存命中")
+#         else：
+#             answer = parse_answer(llm.complete(build_messages(text), json_mode=True))
+#             history.add_entry(session_id, HistoryEntry(...), flush_now=True)
+#             from_cache = False
+#         result = PipelineResult(question=Question(text), answer=answer, reused=from_cache)
+#         on_answer(result, from_cache)
+#         repeat = {CHOICE: cfg.speak_choice_repeat, FILL: cfg.speak_fill_repeat,
+#                   SHORT: cfg.speak_short_repeat, UNKNOWN: 1}[answer.qtype]
+#         loop_speaker.stop()                        # 若上一次还在跑
+#         loop_speaker.start(to_speech_text(answer), max_repeats=repeat)
+#         has_answered_this_frame = True
+#   4. _sleep(cfg.poll_interval)  ← 用 _stop_event.wait(cfg.poll_interval) 实现，让 stop 立刻返回
+#   5. 循环直到 stop() 被调用
+#
+# stop()：设 _stop_event；join 工作线程（timeout）；loop_speaker.stop()；state=STOPPED
+# 全部异常捕获后调 on_error，不让工作线程崩溃
 ```
 
 ---
@@ -340,7 +421,7 @@ settings          # 隔离的 Settings，全部默认值 + 可覆盖
 | 8     | GUI | gui/*.py | 双击 main_window 能开窗；三按钮绑定 ExamPipeline / LoopSpeaker；托盘菜单可用；GUI 层零业务逻辑 |
 | 9     | 打包 exe | ExamChaiTer.spec + scripts/build.ps1 | 产物 dist/ExamChaiTer.exe 存在；双击打开主窗口；无控制台黑框；托盘图标与菜单可用；Ctrl+Alt+Q/S/X 生效（管理员权限下）；缺 API Key 时弹窗提示 |
 | 10    | 配置持久化 + 历史存储 | storage/*.py | ConfigStore + HistoryStore 可读写、可单测；API Key 加密存盘 |
-| 11    | AutoPilot 引擎 | autopilot.py + tts/speaker.py 扩展 | 状态机 + 按题型朗读 N 遍 + 精确缓存命中 |
+| 11    | AutoPilot 引擎 | autopilot.py + tts/speaker.py 扩展 | AutoPilot 纯逻辑可单测；Fake 依赖下能跑完整状态机；缓存命中不调 LLM；按题型朗读 N 遍；stop 后 200ms 内 is_running 为 False |
 | 12    | GUI 大改版 | gui/*.py | Windows 风格 + 配置面板 + 历史面板 + 自动模式开关 |
 
 每个 Phase 结束打 tag：`v0.1.0-phase<N>`。
@@ -417,6 +498,11 @@ Tests: pytest tests/unit/test_xxx.py -q  (N passed)
 - 配置写盘必须原子写（tmp + os.replace），否则崩溃时损坏文件
 - win32crypt 延迟 import；不可用时降级明文并只在首次 log.warning
 - Qt 主线程不能跑 pipeline，Phase 11 必须用 QThread + signal
+
+### Phase 11 AutoPilot 坑清单
+
+- AutoPilot 主循环用 _stop_event.wait(interval) 而非 time.sleep，保证 stop 及时返回
+- AutoPilot 每次新答案必须 add_entry(..., flush_now=True)，否则崩溃会丢历史
 
 ---
 

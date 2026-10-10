@@ -33,6 +33,11 @@ def _build_parser() -> argparse.ArgumentParser:
     speak_parser.add_argument("--real", action="store_true", help="use pyttsx3")
     run_parser = subparsers.add_parser("run", help="start the global-hotkey app")
     run_parser.add_argument("--dry-run", action="store_true", help="print bindings without running")
+    autopilot_parser = subparsers.add_parser(
+        "autopilot-dry-run", help="run the AutoPilot state machine with fake dependencies"
+    )
+    autopilot_parser.add_argument("--frames", type=int, default=5)
+    autopilot_parser.add_argument("--session", default="dry-run")
     gui_parser = subparsers.add_parser("gui", help="start the PySide6 GUI")
     gui_parser.add_argument("--fake", action="store_true", help="construct GUI without event loop")
     subparsers.add_parser("show-config", help="print effective settings with secrets masked")
@@ -263,6 +268,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "gui":
         return _run_gui(fake=args.fake)
 
+    if args.command == "autopilot-dry-run":
+        return _run_autopilot_dry_run(frames=args.frames, session=args.session)
+
     if args.command == "list-windows":
         from examchaiter.capture.window import list_windows
         from examchaiter.errors import WindowError
@@ -276,6 +284,99 @@ def main(argv: Sequence[str] | None = None) -> int:
             left, top, right, bottom = window.rect
             print(f"0x{window.hwnd:08X}\t{window.title}\t{left},{top},{right},{bottom}")
 
+    return 0
+
+
+def _run_autopilot_dry_run(*, frames: int, session: str) -> int:
+    import tempfile
+    import threading
+    import time
+    from pathlib import Path
+    from typing import Any
+
+    from examchaiter.autopilot import (
+        AutoPilot,
+        AutoPilotCallbacks,
+        AutoPilotConfig,
+    )
+    from examchaiter.llm import FakeLLMClient
+    from examchaiter.models import OcrBlock
+    from examchaiter.ocr import FakeOcrEngine
+    from examchaiter.storage.history_store import HistoryStore
+    from examchaiter.tts import FakeSpeaker, LoopSpeaker
+
+    frame_limit = max(1, frames)
+
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if reconfigure is not None:
+        reconfigure(encoding="utf-8")
+
+    class DryRunCapture:
+        """Serves hash A on the first two frames, then hash B."""
+
+        def __init__(self) -> None:
+            self.frames_served = 0
+
+        def grab_window(self, _hwnd: int) -> int:
+            self.frames_served += 1
+            return self.frames_served
+
+        def dhash(self, image: Any) -> int:
+            return 1 if int(image) <= 2 else 2
+
+    capture = DryRunCapture()
+    ocr = FakeOcrEngine(
+        blocks=[
+            OcrBlock(
+                text="示例题目：1+1=? 请从下列选项中选择正确答案。",
+                bbox=(0.0, 0.0, 200.0, 20.0),
+                confidence=0.99,
+            )
+        ]
+    )
+    llm = FakeLLMClient(responses=['{"type":"choice","answer":"B"}'])
+    speaker = FakeSpeaker()
+    loop_speaker = LoopSpeaker(speaker, interval_s=0.01)
+    store = HistoryStore(base_dir=Path(tempfile.mkdtemp()))
+    meta = store.create_session(session)
+
+    states: list[str] = []
+    answers: list[bool] = []
+    statuses: list[str] = []
+    errors: list[str] = []
+    callbacks = AutoPilotCallbacks(
+        on_state=lambda state: states.append(state.value),
+        on_answer=lambda _result, from_cache: answers.append(from_cache),
+        on_status=statuses.append,
+        on_error=lambda exc: errors.append(repr(exc)),
+    )
+    autopilot = AutoPilot(
+        capture=capture,
+        ocr=ocr,
+        llm=llm,
+        loop_speaker=loop_speaker,
+        history_store=store,
+        session_id=meta.session_id,
+        config=AutoPilotConfig(poll_interval=0.02),
+        callbacks=callbacks,
+    )
+
+    autopilot.start(0)
+    waiter = threading.Event()
+    deadline = time.monotonic() + 5.0
+    while capture.frames_served < frame_limit and time.monotonic() < deadline:
+        waiter.wait(0.005)
+    autopilot.stop()
+    loop_speaker.stop()
+
+    cached = sum(1 for from_cache in answers if from_cache)
+    print(f"state transitions: {' -> '.join(states)}")
+    print(f"on_answer count: {len(answers)}")
+    print(f"from_cache: fresh={len(answers) - cached} cached={cached}")
+    if statuses:
+        print(f"status: {'; '.join(statuses)}")
+    if errors:
+        print(f"errors: {'; '.join(errors)}")
     return 0
 
 

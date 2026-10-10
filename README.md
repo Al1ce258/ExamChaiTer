@@ -1,6 +1,6 @@
 # ExamChaiTer
 
-**状态：v0.2.0 Phase 10 完成，配置与历史存储就绪（exe 打包为实验性，见下方说明）**
+**状态：v0.2.0 Phase 11 完成，AutoPilot 引擎就绪（exe 打包为实验性，见下方说明）**
 
 ExamChaiTer 是一个 Windows 本地工具：聚焦指定窗口 -> 截图 -> OCR -> 调用
 OpenAI 兼容接口 -> 仅输出答案 -> 可选循环语音朗读。

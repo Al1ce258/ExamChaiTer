@@ -166,3 +166,16 @@ def test_speak_real_with_import_failure_exits_nonzero(mocker: MockerFixture) -> 
     )
 
     assert main(["speak", "text", "--real"]) != 0
+
+
+def test_autopilot_dry_run_command_reports_answers(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    result = main(["autopilot-dry-run", "--frames", "5", "--session", "smoke"])
+
+    out = capsys.readouterr().out
+    assert (
+        result,
+        "on_answer count: 2" in out,
+        "from_cache: fresh=1 cached=1" in out,
+    ) == (0, True, True)

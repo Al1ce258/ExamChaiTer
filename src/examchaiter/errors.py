@@ -43,3 +43,7 @@ class PipelineError(ExamChaiTerError):
 
 class StorageError(ExamChaiTerError):
     """Raised when configuration or history storage cannot be read or written."""
+
+
+class AutoPilotError(ExamChaiTerError):
+    """Raised when the AutoPilot engine cannot start or control its worker."""
