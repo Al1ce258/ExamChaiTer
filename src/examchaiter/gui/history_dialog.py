@@ -51,9 +51,10 @@ class HistoryDialog(QDialog):
         left = QWidget()
         left.setLayout(left_layout)
 
-        self.entry_table = QTableWidget(0, 4)
-        self.entry_table.setHorizontalHeaderLabels(["时间", "题型", "答案", "题目摘要"])
+        self.entry_table = QTableWidget(0, 5)
+        self.entry_table.setHorizontalHeaderLabels(["时间", "题号", "题型", "答案", "题干摘要"])
         self.entry_table.horizontalHeader().setStretchLastSection(True)
+        self.entry_table.setColumnWidth(1, 60)
         self.entry_table.verticalHeader().setVisible(False)
         self.entry_table.verticalHeader().setDefaultSectionSize(28)
         self.entry_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -118,7 +119,7 @@ class HistoryDialog(QDialog):
             return
         session_id = self._session_ids[row]
         entries = self.controller.load_history(session_id)
-        self._populate_entries([(session_id, entry) for entry in entries.values()])
+        self._populate_entries([(session_id, entry) for entry in entries])
 
     def _on_entry_selected(self) -> None:
         rows = self.entry_table.selectionModel().selectedRows()
@@ -135,8 +136,13 @@ class HistoryDialog(QDialog):
             row = self.entry_table.rowCount()
             self.entry_table.insertRow(row)
             self.entry_table.setItem(row, 0, QTableWidgetItem(_format_time(entry.created_at)))
-            self.entry_table.setItem(row, 1, QTableWidgetItem(entry.answer_qtype))
-            self.entry_table.setItem(row, 2, QTableWidgetItem(entry.answer_content))
+            number_item = QTableWidgetItem(entry.question_no)
+            number_item.setTextAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
+            self.entry_table.setItem(row, 1, number_item)
+            self.entry_table.setItem(row, 2, QTableWidgetItem(entry.answer_qtype))
+            self.entry_table.setItem(row, 3, QTableWidgetItem(entry.answer_content))
             summary = entry.question_text.replace("\n", " ")[:40]
-            self.entry_table.setItem(row, 3, QTableWidgetItem(f"{session_id}: {summary}"))
+            self.entry_table.setItem(row, 4, QTableWidgetItem(f"{session_id}: {summary}"))
         self.detail_edit.clear()

@@ -343,7 +343,7 @@ def test_load_history_delegates_to_store() -> None:
     )
     history_store.entries["s1"] = [entry]
 
-    assert controller.load_history("s1") == {"h1": entry}
+    assert controller.load_history("s1") == [entry]
 
 
 def test_search_history_delegates_to_store() -> None:
@@ -417,7 +417,7 @@ def test_list_sessions_with_store_error_returns_empty() -> None:
 
 
 def test_load_history_with_store_error_returns_empty() -> None:
-    assert _broken_controller().load_history("s1") == {}
+    assert _broken_controller().load_history("s1") == []
 
 
 def test_search_history_with_store_error_returns_empty() -> None:

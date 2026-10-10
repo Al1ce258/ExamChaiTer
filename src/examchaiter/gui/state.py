@@ -152,13 +152,12 @@ class GuiController:
             logger.exception("GUI session listing failed")
             return []
 
-    def load_history(self, session_id: str) -> dict[str, HistoryEntry]:
+    def load_history(self, session_id: str) -> list[HistoryEntry]:
         try:
-            entries = self.history_store.load_session(session_id)
-            return {entry.question_hash: entry for entry in entries}
+            return list(self.history_store.load_session(session_id))
         except Exception:
             logger.exception("GUI history load failed")
-            return {}
+            return []
 
     def search_history(self, keyword: str) -> list[tuple[str, HistoryEntry]]:
         try:

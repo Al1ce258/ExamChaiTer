@@ -15,8 +15,9 @@ from examchaiter.storage.history_store import HistoryEntry, SessionMeta
 pytestmark = pytest.mark.integration
 
 
-def _entry(qhash: str = "h1", text: str = "question") -> HistoryEntry:
+def _entry(qhash: str = "h1", text: str = "question", no: str = "1") -> HistoryEntry:
     return HistoryEntry(
+        question_no=no,
         question_hash=qhash,
         question_text=text,
         answer_qtype="choice",
@@ -25,12 +26,12 @@ def _entry(qhash: str = "h1", text: str = "question") -> HistoryEntry:
     )
 
 
-def _controller(mocker: MockerFixture, entry: HistoryEntry | None = None) -> object:
+def _controller(mocker: MockerFixture, entries: list[HistoryEntry] | None = None) -> object:
     controller = mocker.MagicMock()
-    selected = entry or _entry()
-    controller.list_sessions.return_value = [SessionMeta("s1", "Session 1", 1.0, 1)]
-    controller.load_history.return_value = {"h1": selected}
-    controller.search_history.return_value = [("s1", selected)]
+    selected = entries if entries is not None else [_entry()]
+    controller.list_sessions.return_value = [SessionMeta("s1", "Session 1", 1.0, len(selected))]
+    controller.load_history.return_value = list(selected)
+    controller.search_history.return_value = [("s1", entry) for entry in selected]
     controller.delete_session.return_value = True
     return controller
 
@@ -81,3 +82,32 @@ def test_delete_session_calls_controller_and_refreshes(
         controller.delete_session.call_args.args[0],  # type: ignore[attr-defined]
         controller.list_sessions.call_count,  # type: ignore[attr-defined]
     ) == ("s1", 2)
+
+
+def test_table_has_question_no_column(qtbot: object, mocker: MockerFixture) -> None:
+    controller = _controller(mocker)
+    dialog = HistoryDialog(controller)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)  # type: ignore[attr-defined]
+
+    headers = [
+        dialog.entry_table.horizontalHeaderItem(index).text()
+        for index in range(dialog.entry_table.columnCount())
+    ]
+
+    assert ("题号" in headers, dialog.entry_table.columnWidth(1)) == (True, 60)
+
+
+def test_entries_order_matches_json_order(qtbot: object, mocker: MockerFixture) -> None:
+    controller = _controller(
+        mocker,
+        [_entry("h1", no="1"), _entry("h2", no="2"), _entry("h3", no="3")],
+    )
+    dialog = HistoryDialog(controller)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)  # type: ignore[attr-defined]
+
+    dialog.session_list.setCurrentRow(0)
+
+    numbers = [
+        dialog.entry_table.item(row, 1).text() for row in range(dialog.entry_table.rowCount())
+    ]
+    assert numbers == ["1", "2", "3"]
