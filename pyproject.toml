@@ -77,6 +77,7 @@ omit = [
     "src/examchaiter/gui/style.py",
     "src/examchaiter/gui/config_dialog.py",
     "src/examchaiter/gui/history_dialog.py",
+    "src/examchaiter/gui/answer_list.py",
     "src/examchaiter/gui/autopilot_bridge.py",
 ]
 
