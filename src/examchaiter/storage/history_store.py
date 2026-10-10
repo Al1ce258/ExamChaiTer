@@ -126,11 +126,16 @@ class HistoryStore:
             session = self._ensure_loaded(session_id)
         return session.entries.get(qhash)
 
-    def add_entry(self, session_id: str, entry: HistoryEntry) -> None:
-        """Insert or overwrite ``entry``; the disk write is coalesced until a read/flush."""
+    def add_entry(self, session_id: str, entry: HistoryEntry, *, flush_now: bool = False) -> None:
+        """Insert or overwrite ``entry``.
+
+        The write is coalesced until a read/``flush`` unless ``flush_now`` is set.
+        """
         session = self._ensure_loaded(session_id)
         session.entries[entry.question_hash] = entry
         self._dirty.add(session_id)
+        if flush_now:
+            self.flush()
 
     def rename_session(self, session_id: str, new_name: str) -> bool:
         self.flush()

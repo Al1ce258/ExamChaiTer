@@ -252,3 +252,15 @@ def test_save_replace_failure_preserves_old_file(
         (tmp_path / "sessions" / f"{meta.session_id}.json").read_text(encoding="utf-8")
     )
     assert list(raw["entries"]) == ["h1"]
+
+
+def test_add_entry_flush_now_writes_immediately(tmp_path: Path) -> None:
+    store = HistoryStore(tmp_path)
+    meta = store.create_session("exam")
+
+    store.add_entry(meta.session_id, _entry("h1", content="A"), flush_now=True)
+
+    raw = json.loads(
+        (tmp_path / "sessions" / f"{meta.session_id}.json").read_text(encoding="utf-8")
+    )
+    assert list(raw["entries"]) == ["h1"]
