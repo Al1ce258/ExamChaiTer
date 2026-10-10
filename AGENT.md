@@ -141,6 +141,7 @@ src/examchaiter/
 │   └─ screenshot.py grab_rect / grab_window / dhash / hamming
 ├─ ocr/
 │   ├─ engine.py    OcrEngine(Protocol) + RapidOcrEngine
+│   ├─ filters.py   strip_ui_noise（layout 后、拆题前的 UI 噪音过滤）
 │   └─ layout.py    blocks_to_text
 ├─ llm/
 │   ├─ client.py    LLMClient(Protocol) + OpenAICompatClient + FakeLLMClient
@@ -198,6 +199,14 @@ ExamPipeline.run_once(hwnd: int) -> list[PipelineResult]
     # 返回类型从单个变列表；空列表表示本帧无效（无文字 / 窗口死）
     # __init__ 必填注入 splitter: QuestionSplitter + history_store + session_id（只答不存请显式传 NullHistoryStore）
     # storage/history_store.py 提供 NullHistoryStore（find_by_hash→None、add_or_update_entry 空操作）
+
+# ---- capture/screenshot.py ----
+def grab_window(hwnd: int, client_only: bool = True) -> NDArray[np.uint8]
+    # client_only=True（默认）：仅抓客户区（不含标题栏、菜单栏、边框）
+    #   - 用 GetClientRect(hwnd) 拿客户区尺寸
+    #   - 用 ClientToScreen(hwnd, (0,0)) 拿客户区左上角屏幕坐标
+    #   - 若走 PrintWindow 路径：抓全窗口后按客户区相对偏移剪裁
+    # client_only=False：保留现有整窗语义（向后兼容）
 
 # ---- llm/prompts ----
 parse_answer(raw: str) -> Answer     # 任何输入都不抛异常，最差返回 UNKNOWN；多字母 → MULTI_CHOICE
@@ -280,6 +289,8 @@ class AppConfig:
     auto_speak_fill_repeat: int = 3
     auto_speak_short_repeat: int = 1
     auto_speak_interval: float = 3.0
+    ui_noise_filter: bool = True        # 是否启用 UI 噪音过滤
+    ui_noise_patterns: list[str] = []   # 用户自定义额外过滤正则（可选）
 
 class ConfigStore:
     def __init__(self, base_dir: Path | None = None) -> None
@@ -571,6 +582,8 @@ Tests: pytest tests/unit/test_xxx.py -q  (N passed)
 - `%APPDATA%` 已弃用；不自动迁移，用户手动复制旧数据到 `.examchaiter/`
 - 老版本的 `%APPDATA%\ExamChaiTer\` 内容原样保留，本版本不读、不写、不删
 - `debug-capture` 用于诊断 OCR/拆题问题，每次跑生成 `debug/<timestamp>/` 目录；`debug/` 已 gitignore
+- `grab_window` 默认抓客户区；非客户区（标题栏/菜单栏/状态栏）不进入 OCR
+- UI 噪音过滤在 layout 之后、拆题之前执行（pipeline 层调用）
 
 ### Phase 9 打包坑清单
 
