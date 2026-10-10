@@ -149,7 +149,8 @@ class GuiController:
 
     def load_history(self, session_id: str) -> dict[str, HistoryEntry]:
         try:
-            return dict(self.history_store.load_session(session_id))
+            entries = self.history_store.load_session(session_id)
+            return {entry.question_hash: entry for entry in entries}
         except Exception:
             logger.exception("GUI history load failed")
             return {}

@@ -184,9 +184,10 @@ class ExamPipeline:
         if self.history_store is None or not self.session_id:
             return
         try:
-            self.history_store.add_entry(
+            self.history_store.add_or_update_entry(
                 self.session_id,
                 HistoryEntry(
+                    question_no=split_question.question_no,
                     question_hash=qhash,
                     question_text=split_question.text,
                     answer_qtype=answer.qtype.value,

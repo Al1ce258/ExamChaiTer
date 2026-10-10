@@ -64,7 +64,7 @@ class FakeConfigStore:
 class FakeHistoryStore:
     sessions: list[SessionMeta] = field(default_factory=list)
     created: list[str] = field(default_factory=list)
-    entries: dict[str, dict[str, HistoryEntry]] = field(default_factory=dict)
+    entries: dict[str, list[HistoryEntry]] = field(default_factory=dict)
     search_results: list[tuple[str, HistoryEntry]] = field(default_factory=list)
     deleted: list[str] = field(default_factory=list)
 
@@ -78,8 +78,8 @@ class FakeHistoryStore:
         self.sessions.append(meta)
         return meta
 
-    def load_session(self, session_id: str) -> dict[str, HistoryEntry]:
-        return dict(self.entries.get(session_id, {}))
+    def load_session(self, session_id: str) -> list[HistoryEntry]:
+        return list(self.entries.get(session_id, []))
 
     def search(self, keyword: str) -> list[tuple[str, HistoryEntry]]:
         return list(self.search_results)
@@ -119,7 +119,7 @@ class BrokenStore:
     def create_session(self, name: str) -> SessionMeta:
         raise RuntimeError("boom")
 
-    def load_session(self, session_id: str) -> dict[str, HistoryEntry]:
+    def load_session(self, session_id: str) -> list[HistoryEntry]:
         raise RuntimeError("boom")
 
     def search(self, keyword: str) -> list[tuple[str, HistoryEntry]]:
@@ -330,15 +330,25 @@ def test_list_sessions_delegates_to_store() -> None:
 
 def test_load_history_delegates_to_store() -> None:
     controller, _config, history_store, _created = _auto_controller()
-    entry = HistoryEntry("h1", "question", "choice", "A")
-    history_store.entries["s1"] = {"h1": entry}
+    entry = HistoryEntry(
+        question_hash="h1",
+        question_text="question",
+        answer_qtype="choice",
+        answer_content="A",
+    )
+    history_store.entries["s1"] = [entry]
 
     assert controller.load_history("s1") == {"h1": entry}
 
 
 def test_search_history_delegates_to_store() -> None:
     controller, _config, history_store, _created = _auto_controller()
-    entry = HistoryEntry("h1", "question", "choice", "A")
+    entry = HistoryEntry(
+        question_hash="h1",
+        question_text="question",
+        answer_qtype="choice",
+        answer_content="A",
+    )
     history_store.search_results = [("s1", entry)]
 
     assert controller.search_history("question") == [("s1", entry)]

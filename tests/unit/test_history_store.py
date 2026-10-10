@@ -1,4 +1,4 @@
-"""Unit tests for the JSON-backed :class:`HistoryStore`."""
+"""Unit tests for the JSON-backed :class:`HistoryStore` (schema v2)."""
 
 from __future__ import annotations
 
@@ -12,13 +12,15 @@ from pathlib import Path
 import pytest
 
 from examchaiter.errors import StorageError
+from examchaiter.storage import history_store as history_store_module
 from examchaiter.storage.history_store import HistoryEntry, HistoryStore
 
 
 def _entry(
-    qhash: str, text: str = "题目", created_at: float = 0.0, content: str = "A"
+    qhash: str, text: str = "题目", created_at: float = 0.0, content: str = "A", no: str = ""
 ) -> HistoryEntry:
     return HistoryEntry(
+        question_no=no,
         question_hash=qhash,
         question_text=text,
         answer_qtype="choice",
@@ -31,6 +33,7 @@ def _entry(
 
 def test_history_entry_has_no_image_fields() -> None:
     assert {field.name for field in fields(HistoryEntry)} == {
+        "question_no",
         "question_hash",
         "question_text",
         "answer_qtype",
@@ -62,30 +65,90 @@ def test_create_session_sanitizes_illegal_filename_characters(tmp_path: Path) ->
     assert "/" not in meta.session_id
 
 
+def test_session_file_writes_schema_v2_entry_list(tmp_path: Path) -> None:
+    store = HistoryStore(tmp_path)
+    meta = store.create_session("exam")
+    store.add_or_update_entry(meta.session_id, _entry("h1", no="1"))
+    store.flush()
+
+    raw = json.loads(
+        (tmp_path / "sessions" / f"{meta.session_id}.json").read_text(encoding="utf-8")
+    )
+
+    assert (
+        raw["schema_version"],
+        isinstance(raw["entries"], list),
+        raw["entries"][0]["question_no"],
+    ) == (2, True, "1")
+
+
 def test_list_sessions_after_add_reports_question_count(tmp_path: Path) -> None:
     store = HistoryStore(tmp_path)
     meta = store.create_session("exam")
-    store.add_entry(meta.session_id, _entry("h1"))
-    store.add_entry(meta.session_id, _entry("h2"))
+    store.add_or_update_entry(meta.session_id, _entry("h1"))
+    store.add_or_update_entry(meta.session_id, _entry("h2"))
 
     assert store.list_sessions()[0].question_count == 2
 
 
-def test_add_entry_same_hash_twice_keeps_latest(tmp_path: Path) -> None:
+def test_load_session_returns_entry_list(tmp_path: Path) -> None:
     store = HistoryStore(tmp_path)
     meta = store.create_session("exam")
-    store.add_entry(meta.session_id, _entry("h1", content="A"))
-    store.add_entry(meta.session_id, _entry("h1", content="B"))
+    store.add_or_update_entry(meta.session_id, _entry("h1"))
+
+    assert isinstance(store.load_session(meta.session_id), list)
+
+
+def test_add_or_update_same_hash_keeps_latest(tmp_path: Path) -> None:
+    store = HistoryStore(tmp_path)
+    meta = store.create_session("exam")
+    store.add_or_update_entry(meta.session_id, _entry("h1", content="A"))
+    store.add_or_update_entry(meta.session_id, _entry("h1", content="B"))
 
     entries = store.load_session(meta.session_id)
 
-    assert (len(entries), entries["h1"].answer_content) == (1, "B")
+    assert (len(entries), entries[0].answer_content) == (1, "B")
+
+
+def test_add_or_update_same_hash_preserves_position(tmp_path: Path) -> None:
+    store = HistoryStore(tmp_path)
+    meta = store.create_session("exam")
+    store.add_or_update_entry(meta.session_id, _entry("h1", content="A"))
+    store.add_or_update_entry(meta.session_id, _entry("h2", content="B"))
+    store.add_or_update_entry(meta.session_id, _entry("h1", content="C"))
+
+    entries = store.load_session(meta.session_id)
+
+    assert [entry.question_hash for entry in entries] == ["h1", "h2"]
+    assert entries[0].answer_content == "C"
+
+
+def test_add_or_update_new_hash_appends_at_end(tmp_path: Path) -> None:
+    store = HistoryStore(tmp_path)
+    meta = store.create_session("exam")
+    store.add_or_update_entry(meta.session_id, _entry("h1"))
+    store.add_or_update_entry(meta.session_id, _entry("h2"))
+    store.add_or_update_entry(meta.session_id, _entry("h3"))
+
+    entries = store.load_session(meta.session_id)
+
+    assert [entry.question_hash for entry in entries] == ["h1", "h2", "h3"]
+
+
+def test_get_index_returns_hash_map(tmp_path: Path) -> None:
+    store = HistoryStore(tmp_path)
+    meta = store.create_session("exam")
+    store.add_or_update_entry(meta.session_id, _entry("h1", content="C"))
+
+    index = store.get_index(meta.session_id)
+
+    assert index["h1"].answer_content == "C"
 
 
 def test_find_by_hash_returns_stored_entry(tmp_path: Path) -> None:
     store = HistoryStore(tmp_path)
     meta = store.create_session("exam")
-    store.add_entry(meta.session_id, _entry("h1", content="C"))
+    store.add_or_update_entry(meta.session_id, _entry("h1", content="C"))
 
     assert store.find_by_hash(meta.session_id, "h1") is not None
 
@@ -103,7 +166,28 @@ def test_find_by_hash_on_missing_session_returns_none(tmp_path: Path) -> None:
 
 def test_add_entry_to_missing_session_raises_storage_error(tmp_path: Path) -> None:
     with pytest.raises(StorageError):
-        HistoryStore(tmp_path).add_entry("nope", _entry("h1"))
+        HistoryStore(tmp_path).add_or_update_entry("nope", _entry("h1"))
+
+
+def test_load_v1_schema_returns_empty_with_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sessions = tmp_path / "sessions"
+    sessions.mkdir()
+    (sessions / "old.json").write_text(
+        json.dumps({"name": "old", "entries": {"h1": {"question_hash": "h1"}}}),
+        encoding="utf-8",
+    )
+    warnings: list[str] = []
+    monkeypatch.setattr(
+        history_store_module.logger,
+        "warning",
+        lambda message, *args, **kwargs: warnings.append(str(message)),
+    )
+
+    entries = HistoryStore(tmp_path).load_session("old")
+
+    assert entries == [] and len(warnings) == 1
 
 
 def test_rename_session_updates_display_name(tmp_path: Path) -> None:
@@ -149,8 +233,8 @@ def test_search_matches_across_sessions_sorted_by_time_desc(tmp_path: Path) -> N
     store = HistoryStore(tmp_path)
     older = store.create_session("older")
     newer = store.create_session("newer")
-    store.add_entry(older.session_id, _entry("h1", text="共有题干", created_at=1.0))
-    store.add_entry(newer.session_id, _entry("h2", text="共有题干", created_at=2.0))
+    store.add_or_update_entry(older.session_id, _entry("h1", text="共有题干", created_at=1.0))
+    store.add_or_update_entry(newer.session_id, _entry("h2", text="共有题干", created_at=2.0))
 
     results = store.search("共有")
 
@@ -161,7 +245,7 @@ def test_search_respects_limit(tmp_path: Path) -> None:
     store = HistoryStore(tmp_path)
     meta = store.create_session("exam")
     for index in range(3):
-        store.add_entry(meta.session_id, _entry(f"h{index}", text="关键字"))
+        store.add_or_update_entry(meta.session_id, _entry(f"h{index}", text="关键字"))
 
     assert len(store.search("关键字", limit=2)) == 2
 
@@ -169,7 +253,7 @@ def test_search_respects_limit(tmp_path: Path) -> None:
 def test_search_skips_corrupt_session_file(tmp_path: Path) -> None:
     creator = HistoryStore(tmp_path)
     meta = creator.create_session("exam")
-    creator.add_entry(meta.session_id, _entry("h1", text="关键字"))
+    creator.add_or_update_entry(meta.session_id, _entry("h1", text="关键字"))
     creator.flush()
     (tmp_path / "sessions" / f"{meta.session_id}.json").write_text("{broken", encoding="utf-8")
 
@@ -217,9 +301,10 @@ def test_add_entry_performance_under_500ms(tmp_path: Path) -> None:
     meta = store.create_session("perf")
     start = time.perf_counter()
     for index in range(1000):
-        store.add_entry(
+        store.add_or_update_entry(
             meta.session_id,
             HistoryEntry(
+                question_no=str(index),
                 question_hash=f"h{index}",
                 question_text="performance",
                 answer_qtype="choice",
@@ -237,30 +322,30 @@ def test_save_replace_failure_preserves_old_file(
 ) -> None:
     store = HistoryStore(tmp_path)
     meta = store.create_session("exam")
-    store.add_entry(meta.session_id, _entry("h1", content="A"))
+    store.add_or_update_entry(meta.session_id, _entry("h1", content="A"))
     store.flush()
 
     def _boom(source: str | os.PathLike[str], target: str | os.PathLike[str]) -> None:
         raise OSError("replace failed")
 
     monkeypatch.setattr(os, "replace", _boom)
-    store.add_entry(meta.session_id, _entry("h2", content="B"))
+    store.add_or_update_entry(meta.session_id, _entry("h2", content="B"))
     with pytest.raises(StorageError):
         store.flush()
 
     raw = json.loads(
         (tmp_path / "sessions" / f"{meta.session_id}.json").read_text(encoding="utf-8")
     )
-    assert list(raw["entries"]) == ["h1"]
+    assert [entry["question_hash"] for entry in raw["entries"]] == ["h1"]
 
 
 def test_add_entry_flush_now_writes_immediately(tmp_path: Path) -> None:
     store = HistoryStore(tmp_path)
     meta = store.create_session("exam")
 
-    store.add_entry(meta.session_id, _entry("h1", content="A"), flush_now=True)
+    store.add_or_update_entry(meta.session_id, _entry("h1", content="A"), flush_now=True)
 
     raw = json.loads(
         (tmp_path / "sessions" / f"{meta.session_id}.json").read_text(encoding="utf-8")
     )
-    assert list(raw["entries"]) == ["h1"]
+    assert [entry["question_hash"] for entry in raw["entries"]] == ["h1"]

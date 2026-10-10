@@ -1,4 +1,4 @@
-"""Per-session question/answer history persisted as JSON files."""
+"""Per-session question/answer history persisted as JSON files (schema v2)."""
 
 from __future__ import annotations
 
@@ -11,11 +11,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
+
 from examchaiter.errors import StorageError
 from examchaiter.storage.config_store import ConfigStore
 
 SESSIONS_DIRNAME = "sessions"
 INDEX_FILENAME = "index.json"
+SCHEMA_VERSION = 2
 
 _INVALID_FILENAME_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
@@ -24,10 +27,11 @@ _INVALID_FILENAME_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 class HistoryEntry:
     """One stored question and the answer produced for it."""
 
-    question_hash: str
-    question_text: str
-    answer_qtype: str
-    answer_content: str
+    question_no: str = ""
+    question_hash: str = ""
+    question_text: str = ""
+    answer_qtype: str = ""
+    answer_content: str = ""
     model: str = ""
     latency_ms: int = 0
     created_at: float = 0.0
@@ -48,7 +52,8 @@ class _Session:
     session_id: str
     name: str
     created_at: float
-    entries: dict[str, HistoryEntry]
+    entries: list[HistoryEntry]
+    index: dict[str, int]
 
 
 def _entry_payload(entry: HistoryEntry) -> dict[str, Any]:
@@ -106,15 +111,20 @@ class HistoryStore:
             suffix += 1
             session_id = f"{base}-{suffix}"
         created_at = time.time()
-        self._cache[session_id] = _Session(session_id, session_id, created_at, {})
+        self._cache[session_id] = _Session(session_id, session_id, created_at, [], {})
         self._dirty.add(session_id)
         self.flush()
         return SessionMeta(session_id, session_id, created_at, 0)
 
-    def load_session(self, session_id: str) -> dict[str, HistoryEntry]:
+    def load_session(self, session_id: str) -> list[HistoryEntry]:
         self.flush()
         session = self._ensure_loaded(session_id)
-        return dict(session.entries)
+        return list(session.entries)
+
+    def get_index(self, session_id: str) -> dict[str, HistoryEntry]:
+        self.flush()
+        session = self._ensure_loaded(session_id)
+        return {entry.question_hash: entry for entry in session.entries}
 
     def find_by_hash(self, session_id: str, qhash: str) -> HistoryEntry | None:
         self.flush()
@@ -124,15 +134,20 @@ class HistoryStore:
             if not path.exists():
                 return None
             session = self._ensure_loaded(session_id)
-        return session.entries.get(qhash)
+        position = session.index.get(qhash)
+        return None if position is None else session.entries[position]
 
-    def add_entry(self, session_id: str, entry: HistoryEntry, *, flush_now: bool = False) -> None:
-        """Insert or overwrite ``entry``.
-
-        The write is coalesced until a read/``flush`` unless ``flush_now`` is set.
-        """
+    def add_or_update_entry(
+        self, session_id: str, entry: HistoryEntry, *, flush_now: bool = False
+    ) -> None:
+        """Overwrite a matching ``question_hash`` in place, else append at the end."""
         session = self._ensure_loaded(session_id)
-        session.entries[entry.question_hash] = entry
+        position = session.index.get(entry.question_hash)
+        if position is None:
+            session.entries.append(entry)
+            session.index[entry.question_hash] = len(session.entries) - 1
+        else:
+            session.entries[position] = entry
         self._dirty.add(session_id)
         if flush_now:
             self.flush()
@@ -170,7 +185,7 @@ class HistoryStore:
                 session = self._ensure_loaded(meta.session_id)
             except StorageError:
                 continue
-            for entry in session.entries.values():
+            for entry in session.entries:
                 if keyword in entry.question_text:
                     matches.append((meta.session_id, entry))
         matches.sort(key=lambda item: item[1].created_at, reverse=True)
@@ -213,24 +228,40 @@ class HistoryStore:
             raw = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
             raise StorageError(f"会话文件损坏: {session_id}") from exc
-        raw_entries = raw.get("entries", {}) if isinstance(raw, dict) else {}
-        entries: dict[str, HistoryEntry] = {}
-        for qhash, payload in raw_entries.items():
-            entries[qhash] = _entry_from_payload(payload)
+
+        if not isinstance(raw, dict) or int(raw.get("schema_version", 1)) != SCHEMA_VERSION:
+            version = raw.get("schema_version", 1) if isinstance(raw, dict) else 1
+            logger.warning(
+                "不支持的 session schema v{}，按空 session 处理: {}", version, session_id
+            )
+            session = _Session(session_id, session_id, 0.0, [], {})
+            self._cache[session_id] = session
+            return session
+
+        entries: list[HistoryEntry] = []
+        index: dict[str, int] = {}
+        raw_entries = raw.get("entries", [])
+        if isinstance(raw_entries, list):
+            for payload in raw_entries:
+                entry = _entry_from_payload(payload)
+                index[entry.question_hash] = len(entries)
+                entries.append(entry)
         session = _Session(
             session_id=session_id,
             name=str(raw.get("name", session_id)),
             created_at=float(raw.get("created_at", 0.0)),
             entries=entries,
+            index=index,
         )
         self._cache[session_id] = session
         return session
 
     def _write_session(self, session: _Session) -> None:
         payload = {
+            "schema_version": SCHEMA_VERSION,
             "name": session.name,
             "created_at": session.created_at,
-            "entries": {qhash: _entry_payload(entry) for qhash, entry in session.entries.items()},
+            "entries": [_entry_payload(entry) for entry in session.entries],
         }
         text = json.dumps(payload, ensure_ascii=False, indent=2)
         _atomic_write_text(self._session_path(session.session_id), text)

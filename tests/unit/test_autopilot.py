@@ -199,8 +199,8 @@ def test_new_answer_writes_history_with_flush_now() -> None:
     deps.autopilot.stop(timeout=1.0)
 
     assert (
-        deps.history.add_entry.call_count,
-        deps.history.add_entry.call_args.kwargs.get("flush_now"),
+        deps.history.add_or_update_entry.call_count,
+        deps.history.add_or_update_entry.call_args.kwargs.get("flush_now"),
     ) == (1, True)
 
 

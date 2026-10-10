@@ -60,7 +60,9 @@ class FakeHistory:
     def find_by_hash(self, _session_id: str, qhash: str) -> HistoryEntry | None:
         return self.entries.get(qhash)
 
-    def add_entry(self, _session_id: str, entry: HistoryEntry, *, flush_now: bool = False) -> None:
+    def add_or_update_entry(
+        self, _session_id: str, entry: HistoryEntry, *, flush_now: bool = False
+    ) -> None:
         self.added.append(entry)
         self.entries[entry.question_hash] = entry
 

@@ -186,7 +186,7 @@ class AutoPilot:
             raw = self._llm.complete(build_messages(text), json_mode=True)
             answer = parse_answer(raw)
             from_cache = False
-            self._history.add_entry(
+            self._history.add_or_update_entry(
                 self._session_id,
                 HistoryEntry(
                     question_hash=qhash,
