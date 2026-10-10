@@ -2,7 +2,7 @@
 
 import argparse
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 from examchaiter import __version__
 from examchaiter.config import Settings
@@ -48,6 +48,15 @@ def _display_settings(settings: Settings) -> dict[str, object]:
     values: dict[str, object] = settings.model_dump(mode="json")
     values["llm_api_key"] = "sk-***" if settings.llm_api_key is not None else "<unset>"
     return values
+
+
+def _prefixed_printer(prefix: str) -> Callable[[str], object]:
+    """Return a printer that prefixes each rendered answer (multi-question CLI)."""
+
+    def _printer(text: str) -> object:
+        return print(prefix + text)
+
+    return _printer
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -177,13 +186,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             ocr = FakeOcrEngine(
                 blocks=[
-                    OcrBlock(text="示例题目 1+1=?", bbox=(0.0, 0.0, 180.0, 20.0), confidence=0.99)
+                    OcrBlock(
+                        text="1. 示例题目 1+1=?\n2. 示例题目 2+2=?\n3. 示例题目 3+3=?",
+                        bbox=(0.0, 0.0, 300.0, 60.0),
+                        confidence=0.99,
+                    )
                 ]
             )
             llm = FakeLLMClient(
                 responses=[
-                    '[{"no": "", "text": "示例题目 1+1=?"}]',
                     '{"type":"choice","answer":"B"}',
+                    '{"type":"choice","answer":"C"}',
+                    '{"type":"choice","answer":"D"}',
                 ]
             )
 
@@ -202,9 +216,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         reconfigure = getattr(sys.stdout, "reconfigure", None)
         if reconfigure is not None:
             reconfigure(encoding="utf-8")
-        presenter = Presenter(settings, _printer=print)
         for result in results:
-            presenter.show(result.answer)
+            prefix = f"{result.question_no}. " if result.question_no else ""
+            Presenter(settings, _printer=_prefixed_printer(prefix)).show(result)
 
     if args.command == "speak":
         import time

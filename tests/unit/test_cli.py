@@ -102,10 +102,12 @@ def test_ask_command_with_real_without_key_exits_nonzero(
     assert exc_info.value.code != 0
 
 
-def test_answer_command_without_real_prints_display(capsys: pytest.CaptureFixture[str]) -> None:
+def test_answer_command_without_real_prints_multi_question_display(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     main(["answer", "--title", "任意"])
 
-    assert capsys.readouterr().out == "答案：B\n"
+    assert capsys.readouterr().out == "1. 答案：B\n2. 答案：C\n3. 答案：D\n"
 
 
 def test_speak_command_without_real_prints_spoken_text(capsys: pytest.CaptureFixture[str]) -> None:
