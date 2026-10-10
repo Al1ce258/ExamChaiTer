@@ -70,7 +70,7 @@ def test_grab_window_with_valid_hwnd_passes_window_rect(
         screenshot_module, "grab_rect", return_value=np.zeros((38, 29, 3), dtype=np.uint8)
     )
 
-    screenshot_module.grab_window(10)
+    screenshot_module.grab_window(10, client_only=False)
 
     fake_grab.assert_called_once_with(rect)
 
@@ -126,7 +126,7 @@ def test_grab_window_uses_printwindow_first(mocker: MockerFixture) -> None:
     print_window = mocker.patch.object(screenshot_module, "_print_window", return_value=True)
     fallback = mocker.patch.object(screenshot_module, "grab_rect")
 
-    image = screenshot_module.grab_window(7)
+    image = screenshot_module.grab_window(7, client_only=False)
 
     assert print_window.call_count == 1 and fallback.call_count == 0
     assert image.shape == (1, 2, 3)
@@ -139,7 +139,7 @@ def test_grab_window_falls_back_to_mss_on_black(mocker: MockerFixture) -> None:
     fallback = np.full((1, 1, 3), 7, dtype=np.uint8)
     grab_rect = mocker.patch.object(screenshot_module, "grab_rect", return_value=fallback)
 
-    image = screenshot_module.grab_window(7)
+    image = screenshot_module.grab_window(7, client_only=False)
 
     assert grab_rect.call_count == 1 and image is fallback
 
@@ -150,4 +150,56 @@ def test_grab_window_raises_on_both_fail(mocker: MockerFixture) -> None:
     mocker.patch.object(screenshot_module, "grab_rect", side_effect=CaptureError("mss failed"))
 
     with pytest.raises(CaptureError):
-        screenshot_module.grab_window(7)
+        screenshot_module.grab_window(7, client_only=False)
+
+
+def test_grab_window_client_only_trims_titlebar(mocker: MockerFixture) -> None:
+    win32gui = mocker.MagicMock()
+    win32gui.GetWindowRect.return_value = (100, 100, 900, 700)
+    win32gui.GetClientRect.return_value = (0, 0, 800, 560)
+    win32gui.ClientToScreen.return_value = (108, 130)
+    mocker.patch.object(
+        screenshot_module, "_load_win32_capture", return_value=(win32gui, mocker.MagicMock())
+    )
+    rows = np.tile(np.arange(600, dtype=np.uint8)[:, np.newaxis], (1, 800))
+    full_window = np.repeat(rows[:, :, np.newaxis], 3, axis=2)
+    mocker.patch.object(screenshot_module, "_grab_window_printwindow", return_value=full_window)
+
+    image = screenshot_module.grab_window(7)
+
+    assert image.shape == (560, 800, 3) and int(image[0, 0, 0]) == 30
+
+
+def test_grab_window_client_only_falls_back_to_mss_on_black(
+    mocker: MockerFixture,
+) -> None:
+    win32gui = mocker.MagicMock()
+    win32gui.GetWindowRect.return_value = (100, 100, 900, 700)
+    win32gui.GetClientRect.return_value = (0, 0, 800, 560)
+    win32gui.ClientToScreen.return_value = (108, 130)
+    mocker.patch.object(
+        screenshot_module, "_load_win32_capture", return_value=(win32gui, mocker.MagicMock())
+    )
+    mocker.patch.object(
+        screenshot_module,
+        "_grab_window_printwindow",
+        return_value=np.zeros((600, 800, 3), dtype=np.uint8),
+    )
+    fallback = np.full((560, 800, 3), 7, dtype=np.uint8)
+    grab_rect = mocker.patch.object(screenshot_module, "grab_rect", return_value=fallback)
+
+    image = screenshot_module.grab_window(7)
+
+    assert image is fallback
+    assert grab_rect.call_args.args[0] == (108, 130, 908, 690)
+
+
+def test_grab_window_full_window_when_client_only_false(mocker: MockerFixture) -> None:
+    full_window = np.array([[[0, 0, 0], [255, 255, 255]]], dtype=np.uint8)
+    mocker.patch.object(screenshot_module, "_grab_window_printwindow", return_value=full_window)
+    client_geometry = mocker.patch.object(screenshot_module, "_client_geometry")
+
+    image = screenshot_module.grab_window(7, client_only=False)
+
+    assert image.shape == full_window.shape
+    assert client_geometry.call_count == 0

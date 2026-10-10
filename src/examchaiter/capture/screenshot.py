@@ -103,17 +103,83 @@ def grab_rect(rect: tuple[int, int, int, int]) -> ImageArray:
     return np.ascontiguousarray(frame[:, :, :3])
 
 
-def grab_window(hwnd: int) -> ImageArray:
+def _client_geometry(
+    hwnd: int,
+) -> tuple[tuple[int, int, int, int], tuple[int, int], tuple[int, int]] | None:
+    """Return client screen rect, window-relative offset, and client size."""
+
+    modules = _load_win32_capture()
+    if modules is None:
+        return None
+    win32gui, _win32ui = modules
+    try:
+        window_left, window_top, _window_right, _window_bottom = win32gui.GetWindowRect(hwnd)
+        client_left, client_top, client_right, client_bottom = win32gui.GetClientRect(hwnd)
+        screen_left, screen_top = win32gui.ClientToScreen(hwnd, (0, 0))
+    except Exception:
+        logger.warning("客户区几何获取失败，降级整窗抓取: hwnd={}", hwnd)
+        return None
+
+    client_width = int(client_right - client_left)
+    client_height = int(client_bottom - client_top)
+    if client_width <= 0 or client_height <= 0:
+        return None
+
+    offset = (int(screen_left - window_left), int(screen_top - window_top))
+    if offset[0] < 0 or offset[1] < 0:
+        return None
+    screen_rect = (
+        int(screen_left),
+        int(screen_top),
+        int(screen_left + client_width),
+        int(screen_top + client_height),
+    )
+    return screen_rect, offset, (client_width, client_height)
+
+
+def _crop_client_area(
+    image: ImageArray, offset_x: int, offset_y: int, client_width: int, client_height: int
+) -> ImageArray:
+    """Crop to the client area and pad edge pixels if PrintWindow is slightly short."""
+
+    cropped = image[
+        offset_y : offset_y + client_height,
+        offset_x : offset_x + client_width,
+    ]
+    if cropped.size == 0:
+        return cropped
+
+    missing_y = max(0, client_height - cropped.shape[0])
+    missing_x = max(0, client_width - cropped.shape[1])
+    if missing_x or missing_y:
+        cropped = np.pad(
+            cropped,
+            ((0, missing_y), (0, missing_x), (0, 0)),
+            mode="edge",
+        )
+    return np.ascontiguousarray(cropped)
+
+
+def grab_window(hwnd: int, client_only: bool = True) -> ImageArray:
     """Capture a window, preferring PrintWindow so occluded windows still work.
 
     Falls back to a screen grab when PrintWindow is unavailable or the rendered
     frame is blank, and raises :class:`CaptureError` when both paths fail.
     """
 
+    geometry = _client_geometry(hwnd) if client_only else None
     image = _grab_window_printwindow(hwnd)
     if image is not None and not _is_blank(image):
-        return image
-    return grab_rect(get_window_rect(hwnd))
+        if geometry is None:
+            return image
+        screen_rect, (offset_x, offset_y), (client_width, client_height) = geometry
+        cropped = _crop_client_area(image, offset_x, offset_y, client_width, client_height)
+        if cropped.size > 0 and not _is_blank(cropped):
+            return cropped
+        return grab_rect(screen_rect)
+
+    fallback_rect = geometry[0] if geometry is not None else get_window_rect(hwnd)
+    return grab_rect(fallback_rect)
 
 
 def dhash(image: ImageArray, hash_size: int = 8) -> int:
