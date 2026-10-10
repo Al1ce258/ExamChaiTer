@@ -136,6 +136,19 @@ class GuiController:
     def is_tts_running(self) -> bool:
         return self.state.tts_running
 
+    def get_llm_status(self) -> str:
+        """Return ``"ready"`` when an API key is configured, else ``"unconfigured"``.
+
+        This only inspects the in-memory settings; it never touches the network.
+        """
+        api_key = self.settings.llm_api_key
+        if api_key is None:
+            return "unconfigured"
+        return "ready" if api_key.get_secret_value() else "unconfigured"
+
+    def is_llm_ready(self) -> bool:
+        return self.get_llm_status() == "ready"
+
     def get_config(self) -> AppConfig:
         try:
             return self.config_store.load()

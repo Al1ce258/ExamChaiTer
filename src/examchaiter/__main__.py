@@ -6,6 +6,8 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
+
 from examchaiter import __version__
 from examchaiter.config import Settings
 
@@ -699,7 +701,13 @@ def _run_gui(*, fake: bool) -> int:
     from examchaiter.gui.main_window import MainWindow
     from examchaiter.gui.state import GuiController
     from examchaiter.gui.tray import TrayController
-    from examchaiter.llm import FakeLLMClient, OpenAICompatClient
+    from examchaiter.llm import (
+        FakeLLMClient,
+        LazyLLMClient,
+        LLMClient,
+        LLMFailed,
+        OpenAICompatClient,
+    )
     from examchaiter.llm.splitter import QuestionSplitter
     from examchaiter.models import OcrBlock, PipelineResult
     from examchaiter.ocr import FakeOcrEngine, RapidOcrEngine
@@ -791,13 +799,23 @@ def _run_gui(*, fake: bool) -> int:
         api_key = settings.llm_api_key.get_secret_value() if settings.llm_api_key else ""
         capture = ScreenshotCapture()
         ocr = RapidOcrEngine()
-        llm = OpenAICompatClient(
-            base_url=settings.llm_base_url,
-            api_key=api_key,
-            model=settings.llm_model,
-            timeout=settings.llm_timeout_s,
-            max_retry=settings.llm_max_retry,
-        )
+
+        def build_llm_client() -> LLMClient:
+            return OpenAICompatClient(
+                base_url=settings.llm_base_url,
+                api_key=api_key,
+                model=settings.llm_model,
+                timeout=settings.llm_timeout_s,
+                max_retry=settings.llm_max_retry,
+            )
+
+        # Never block GUI startup on a missing/expired key: fall back to a lazy
+        # client that only fails when the user actually requests an answer.
+        try:
+            llm = build_llm_client()
+        except LLMFailed as exc:
+            logger.warning("LLM 未就绪，GUI 以 Lazy 模式启动：{}", exc)
+            llm = LazyLLMClient(build_llm_client)
         loop_speaker = LoopSpeaker(Pyttsx3Speaker(rate=settings.tts_rate))
         presenter = Presenter(settings)
 

@@ -271,3 +271,32 @@ def test_debug_capture_writes_all_files(tmp_path: Path, capsys: pytest.CaptureFi
     assert split_payload["mode"] == "llm"
     assert split_payload["questions"] == [{"no": "1", "text": layout_text}]
     assert "题号=['1']" in capsys.readouterr().out
+
+
+def test_gui_startup_without_key_does_not_crash(
+    monkeypatch: pytest.MonkeyPatch, mocker: MockerFixture
+) -> None:
+    monkeypatch.delenv("EXAMCHAITER_LLM_API_KEY", raising=False)
+    monkeypatch.setattr(sys, "argv", ["examchaiter"])
+    mocker.patch("PySide6.QtWidgets.QApplication.exec", return_value=0)
+    mocker.patch("examchaiter.ocr.RapidOcrEngine", return_value=FakeOcrEngine(blocks=[]))
+    mocker.patch("examchaiter.tts.Pyttsx3Speaker")
+
+    assert main(["gui"]) == 0
+
+
+def test_gui_startup_with_broken_dpapi_key_does_not_crash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mocker: MockerFixture
+) -> None:
+    monkeypatch.delenv("EXAMCHAITER_LLM_API_KEY", raising=False)
+    monkeypatch.setattr(sys, "argv", ["examchaiter"])
+    storage = tmp_path / ".examchaiter"
+    storage.mkdir()
+    (storage / "config.json").write_text(
+        json.dumps({"api_key_enc": "invalid-base64"}), encoding="utf-8"
+    )
+    mocker.patch("PySide6.QtWidgets.QApplication.exec", return_value=0)
+    mocker.patch("examchaiter.ocr.RapidOcrEngine", return_value=FakeOcrEngine(blocks=[]))
+    mocker.patch("examchaiter.tts.Pyttsx3Speaker")
+
+    assert main(["gui"]) == 0

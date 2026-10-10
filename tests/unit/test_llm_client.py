@@ -7,7 +7,13 @@ from loguru import logger
 from pytest_mock import MockerFixture
 
 from examchaiter.llm import client as client_module
-from examchaiter.llm.client import FakeLLMClient, LLMFailed, LLMTimeout, OpenAICompatClient
+from examchaiter.llm.client import (
+    FakeLLMClient,
+    LazyLLMClient,
+    LLMFailed,
+    LLMTimeout,
+    OpenAICompatClient,
+)
 
 
 def test_fake_llm_client_with_responses_returns_in_order() -> None:
@@ -174,3 +180,38 @@ def _http_error(status_code: int) -> Exception:
     error = Exception("HTTP failure")
     error.status_code = status_code  # type: ignore[attr-defined]
     return error
+
+
+def test_lazy_client_constructs_on_first_call(mocker: MockerFixture) -> None:
+    inner = mocker.Mock()
+    inner.complete.return_value = "answer"
+    factory = mocker.Mock(return_value=inner)
+    client = LazyLLMClient(factory)
+
+    result = client.complete([{"role": "user", "content": "q"}])
+
+    assert result == "answer"
+    factory.assert_called_once()
+    inner.complete.assert_called_once()
+
+
+def test_lazy_client_caches_after_first_call(mocker: MockerFixture) -> None:
+    inner = mocker.Mock()
+    inner.complete.side_effect = ["a", "b"]
+    factory = mocker.Mock(return_value=inner)
+    client = LazyLLMClient(factory)
+
+    assert client.complete([]) == "a"
+    assert client.complete([]) == "b"
+    factory.assert_called_once()
+    assert inner.complete.call_count == 2
+
+
+def test_lazy_client_propagates_factory_error() -> None:
+    def _boom() -> object:
+        raise RuntimeError("missing api key")
+
+    client = LazyLLMClient(_boom)  # type: ignore[arg-type]
+
+    with pytest.raises(LLMFailed):
+        client.complete([])

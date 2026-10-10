@@ -2,6 +2,7 @@
 
 from examchaiter.llm.client import (
     FakeLLMClient,
+    LazyLLMClient,
     LLMClient,
     LLMFailed,
     LLMTimeout,
@@ -21,6 +22,7 @@ __all__ = [
     "LLMFailed",
     "LLMTimeout",
     "OpenAICompatClient",
+    "LazyLLMClient",
     "QuestionSplitter",
     "build_messages",
     "build_split_messages",

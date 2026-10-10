@@ -39,6 +39,8 @@ _STATUS_TEXT = {
     "error": "错误",
 }
 
+_LLM_UNCONFIGURED_HINT = "未配置 API Key，请点击配置"
+
 
 def _add_shadow(widget: QWidget, blur: int, dy: int, alpha: int) -> None:
     effect = QGraphicsDropShadowEffect(widget)
@@ -102,6 +104,8 @@ class MainWindow(QMainWindow):
 
         self.refresh_windows()
         self._refresh_view()
+        if not self.controller.is_llm_ready():
+            self.statusBar().showMessage(_LLM_UNCONFIGURED_HINT)
 
     def _build_top_bar(self) -> QFrame:
         self.window_combo = QComboBox()
@@ -185,7 +189,19 @@ class MainWindow(QMainWindow):
             self.window_combo.addItem(f"{window.hwnd}: {window.title}", window.hwnd)
 
     def on_answer_clicked(self) -> None:
+        if not self._ensure_llm_ready():
+            return
         QTimer.singleShot(0, self._run_answer)
+
+    def _ensure_llm_ready(self) -> bool:
+        if self.controller.is_llm_ready():
+            return True
+        QMessageBox.information(
+            self,
+            "未配置 API Key",
+            "尚未配置 API Key，请点击「配置」按钮填写后重启程序。",
+        )
+        return False
 
     def _run_answer(self) -> None:
         results = list(self.controller.answer_once())
@@ -219,6 +235,9 @@ class MainWindow(QMainWindow):
 
     def on_auto_toggled(self, checked: bool) -> None:
         if checked:
+            if not self._ensure_llm_ready():
+                self._set_auto_checked(False)
+                return
             hwnd = self.controller.state.current_hwnd
             if hwnd is None:
                 self._set_auto_checked(False)

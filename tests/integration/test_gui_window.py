@@ -206,3 +206,25 @@ def test_status_bar_is_chinese(qtbot: object, mocker: MockerFixture) -> None:
         "stopped": "自动模式已停止",
         "error": "错误",
     }
+
+
+def test_answer_clicked_without_key_shows_messagebox(qtbot: object, mocker: MockerFixture) -> None:
+    controller = _controller(mocker)
+    controller.is_llm_ready.return_value = False
+    information = mocker.patch("PySide6.QtWidgets.QMessageBox.information")
+    window = MainWindow(controller, Settings(_env_file=None))  # type: ignore[arg-type]
+    qtbot.addWidget(window)  # type: ignore[attr-defined]
+
+    qtbot.mouseClick(window.answer_button, Qt.MouseButton.LeftButton)  # type: ignore[attr-defined]
+
+    assert information.call_count == 1
+    controller.answer_once.assert_not_called()
+
+
+def test_status_bar_shows_unconfigured_hint(qtbot: object, mocker: MockerFixture) -> None:
+    controller = _controller(mocker)
+    controller.is_llm_ready.return_value = False
+    window = MainWindow(controller, Settings(_env_file=None))  # type: ignore[arg-type]
+    qtbot.addWidget(window)  # type: ignore[attr-defined]
+
+    assert "未配置 API Key" in window.statusBar().currentMessage()

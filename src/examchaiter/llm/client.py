@@ -128,3 +128,23 @@ def _is_timeout(exc: BaseException) -> bool:
         "ReadTimeout",
         "TimeoutException",
     }
+
+
+class LazyLLMClient:
+    """Delay building the real client until the first ``complete`` call.
+
+    Used at GUI startup so a missing/expired API key does not block the window
+    from opening; the failure surfaces only when an answer is requested.
+    """
+
+    def __init__(self, factory: Callable[[], LLMClient]) -> None:
+        self._factory = factory
+        self._client: LLMClient | None = None
+
+    def complete(self, messages: list[Message], *, json_mode: bool = False) -> str:
+        if self._client is None:
+            try:
+                self._client = self._factory()
+            except Exception as exc:
+                raise LLMFailed(f"LLM 未就绪：{exc}") from exc
+        return self._client.complete(messages, json_mode=json_mode)
