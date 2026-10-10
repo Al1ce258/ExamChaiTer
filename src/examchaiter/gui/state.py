@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from loguru import logger
 
 from examchaiter.autopilot import AutoPilot, AutoPilotCallbacks
 from examchaiter.capture.window import list_windows as default_list_windows
 from examchaiter.config import Settings
-from examchaiter.models import Answer, WindowInfo
+from examchaiter.models import Answer, PipelineResult, WindowInfo
 from examchaiter.output.formatter import to_speech_text
 from examchaiter.output.presenter import Presenter
 from examchaiter.pipeline import ExamPipeline
@@ -33,12 +33,17 @@ def _noop_callbacks() -> AutoPilotCallbacks:
 @dataclass
 class GuiState:
     current_hwnd: int | None = None
-    last_answer: Answer | None = None
+    last_results: list[PipelineResult] = field(default_factory=list)
     last_question_text: str = ""
     tts_running: bool = False
     busy: bool = False
     auto_running: bool = False
     current_session_id: str | None = None
+
+    @property
+    def last_answer(self) -> Answer | None:
+        """Shortcut to the most recent answer, kept for existing callers."""
+        return self.last_results[-1].answer if self.last_results else None
 
 
 class GuiController:
@@ -85,23 +90,23 @@ class GuiController:
             logger.exception("GUI window selection failed")
             return None
 
-    def answer_once(self) -> Answer | None:
+    def answer_once(self) -> list[PipelineResult]:
         if self.state.busy or self.state.current_hwnd is None:
-            return None
+            return []
 
         self.state.busy = True
         try:
-            results = self.pipeline.run_once(self.state.current_hwnd)
+            results = list(self.pipeline.run_once(self.state.current_hwnd))
             if not results:
-                return None
-            result = results[0]
-            self.presenter.show(result)
-            self.state.last_answer = result.answer
-            self.state.last_question_text = result.question.text
-            return result.answer
+                return []
+            for result in results:
+                self.presenter.show(result)
+            self.state.last_results = list(results)
+            self.state.last_question_text = results[0].question.text
+            return list(results)
         except Exception:
             logger.exception("GUI answer action failed")
-            return None
+            return []
         finally:
             self.state.busy = False
 

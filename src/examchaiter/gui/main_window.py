@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import cast
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QCloseEvent, QColor
 from PySide6.QtWidgets import (
     QApplication,
@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from examchaiter.config import Settings
+from examchaiter.gui.answer_list import AnswerList
 from examchaiter.gui.autopilot_bridge import AutoPilotBridge
 from examchaiter.gui.config_dialog import ConfigDialog
 from examchaiter.gui.history_dialog import HistoryDialog
@@ -30,7 +31,6 @@ from examchaiter.gui.state import GuiController
 from examchaiter.gui.style import apply_style
 from examchaiter.models import PipelineResult
 
-_EMPTY_HINT = "等待作答"
 _STATUS_TEXT = {
     "idle": "就绪",
     "running": "自动模式运行中",
@@ -96,6 +96,7 @@ class MainWindow(QMainWindow):
         self.history_button.clicked.connect(self.open_history_dialog)
         self.bridge.state_changed.connect(self._on_auto_state)
         self.bridge.answer_ready.connect(self._on_answer_ready)
+        self.bridge.round_done.connect(self._on_round_done)
         self.bridge.status_message.connect(self._on_status_message)
         self.bridge.error_occurred.connect(self._on_error)
 
@@ -130,14 +131,10 @@ class MainWindow(QMainWindow):
         self.preview_edit = QPlainTextEdit()
         self.preview_edit.setObjectName("question_view")
         self.preview_edit.setReadOnly(True)
-        self.answer_label = QLabel(_EMPTY_HINT)
-        self.answer_label.setObjectName("AnswerDisplay")
-        self.answer_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.answer_label.setWordWrap(True)
-        self.answer_label.setProperty("state", "empty")
+        self.answer_list = AnswerList()
 
         preview_card = self._card("题目预览", self.preview_edit)
-        answer_card = self._card("答案", self.answer_label)
+        answer_card = self._card("答案", self.answer_list)
         _add_shadow(preview_card, blur=18, dy=2, alpha=22)
         _add_shadow(answer_card, blur=18, dy=2, alpha=22)
 
@@ -191,8 +188,12 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._run_answer)
 
     def _run_answer(self) -> None:
-        self.controller.answer_once()
+        results = list(self.controller.answer_once())
         self._refresh_view()
+        if results:
+            self.answer_list.set_results(results)
+            cached = sum(1 for result in results if result.reused)
+            self.statusBar().showMessage(f"共 {len(results)} 题，{cached} 题缓存命中")
 
     def on_toggle_tts_clicked(self) -> None:
         self.controller.toggle_tts()
@@ -233,10 +234,16 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(self._format_status(state_value))
 
     def _on_answer_ready(self, result: PipelineResult, from_cache: bool) -> None:
-        self.preview_edit.setPlainText(result.question.text)
-        self._set_answer_text(result.answer.content)
+        number = result.question_no or "?"
         suffix = "（缓存）" if from_cache else ""
-        self.statusBar().showMessage(f"已作答{suffix}")
+        self.statusBar().showMessage(f"已作答 [{number}]{suffix}")
+
+    def _on_round_done(self, results: list[PipelineResult]) -> None:
+        self.answer_list.set_results(list(results))
+        if results:
+            self.preview_edit.setPlainText(results[0].question.text)
+        cached = sum(1 for result in results if result.reused)
+        self.statusBar().showMessage(f"本轮共 {len(results)} 题，{cached} 题缓存命中")
 
     def _on_status_message(self, message: str) -> None:
         self.statusBar().showMessage(message)
@@ -249,16 +256,10 @@ class MainWindow(QMainWindow):
         self.auto_checkbox.setChecked(checked)
         self.auto_checkbox.blockSignals(False)
 
-    def _set_answer_text(self, text: str) -> None:
-        has_answer = bool(text)
-        self.answer_label.setText(text if has_answer else _EMPTY_HINT)
-        self.answer_label.setProperty("state", "filled" if has_answer else "empty")
-        self._repolish(self.answer_label)
-
     def _refresh_view(self) -> None:
         state = self.controller.state
         self.preview_edit.setPlainText(state.last_question_text)
-        self._set_answer_text(state.last_answer.content if state.last_answer else "")
+        self.answer_list.set_results(list(state.last_results or []))
         running = self.controller.is_tts_running()
         self.toggle_button.setText("停止朗读" if running else "开始朗读")
         self.toggle_button.setProperty("class", "primary" if running else "secondary")

@@ -18,6 +18,7 @@ class AutoPilotBridge(QObject):
 
     state_changed = Signal(str)
     answer_ready = Signal(object, bool)
+    round_done = Signal(list)
     status_message = Signal(str)
     error_occurred = Signal(object)
 
@@ -27,7 +28,11 @@ class AutoPilotBridge(QObject):
             on_answer=self._emit_answer,
             on_status=self._emit_status,
             on_error=self._emit_error,
+            on_round_done=self._emit_round_done,
         )
+
+    def _emit_round_done(self, results: list[PipelineResult]) -> None:
+        self.round_done.emit(results)
 
     def _emit_state(self, state: AutoPilotState) -> None:
         self.state_changed.emit(state.value)

@@ -19,12 +19,22 @@ from examchaiter.models import Answer, PipelineResult, Question, QuestionType, W
 pytestmark = pytest.mark.integration
 
 
+def _result(no: str = "1", content: str = "B", *, reused: bool = False) -> PipelineResult:
+    return PipelineResult(
+        question=Question(text="What is 1+1?"),
+        answer=Answer(qtype=QuestionType.CHOICE, content=content),
+        reused=reused,
+        question_no=no,
+    )
+
+
 def _controller(mocker: MockerFixture) -> object:
     controller = mocker.MagicMock()
     controller.list_windows.return_value = [
         WindowInfo(hwnd=1, title="Exam", rect=(0, 0, 100, 100)),
         WindowInfo(hwnd=2, title="Chat", rect=(0, 0, 100, 100)),
     ]
+    controller.state.last_results = [_result("1", "B")]
     controller.state.last_answer = Answer(qtype=QuestionType.CHOICE, content="B")
     controller.state.last_question_text = "Question preview"
     controller.is_tts_running.return_value = False
@@ -108,21 +118,45 @@ def test_auto_toggle_calls_start_stop(qtbot: object, mocker: MockerFixture) -> N
     assert (started, controller.stop_auto.called) == (True, True)
 
 
-def test_answer_ready_updates_labels(qtbot: object, mocker: MockerFixture) -> None:
+def test_answer_ready_updates_status_bar(qtbot: object, mocker: MockerFixture) -> None:
     controller = _controller(mocker)
     window = MainWindow(controller, Settings(_env_file=None))  # type: ignore[arg-type]
     qtbot.addWidget(window)  # type: ignore[attr-defined]
-    result = PipelineResult(
-        question=Question(text="What is 1+1?"),
-        answer=Answer(qtype=QuestionType.CHOICE, content="B"),
+
+    window.bridge.answer_ready.emit(_result("2", "C", reused=True), True)
+
+    message = window.statusBar().currentMessage()
+    assert message.startswith("已作答")
+    assert "[2]" in message
+    assert "缓存" in message
+
+
+def test_round_done_updates_answer_list(qtbot: object, mocker: MockerFixture) -> None:
+    controller = _controller(mocker)
+    window = MainWindow(controller, Settings(_env_file=None))  # type: ignore[arg-type]
+    qtbot.addWidget(window)  # type: ignore[attr-defined]
+
+    window.bridge.round_done.emit(
+        [_result("1", "A"), _result("2", "B", reused=True), _result("", "C")]
     )
 
-    window.bridge.answer_ready.emit(result, False)
+    assert window.answer_list.row_texts() == ["[1] A", "[2] B  · 缓存", "[?] C"]
 
-    assert (window.answer_label.text(), window.preview_edit.toPlainText()) == (
-        "B",
-        "What is 1+1?",
-    )
+
+def test_manual_answer_shows_multiple_items(qtbot: object, mocker: MockerFixture) -> None:
+    controller = _controller(mocker)
+    controller.answer_once.return_value = [
+        _result("1", "A"),
+        _result("2", "B"),
+        _result("3", "C"),
+    ]
+    window = MainWindow(controller, Settings(_env_file=None))  # type: ignore[arg-type]
+    qtbot.addWidget(window)  # type: ignore[attr-defined]
+
+    qtbot.mouseClick(window.answer_button, Qt.MouseButton.LeftButton)  # type: ignore[attr-defined]
+    qtbot.waitUntil(lambda: len(window.answer_list.row_texts()) == 3, timeout=1000)  # type: ignore[attr-defined]
+
+    assert window.answer_list.row_texts() == ["[1] A", "[2] B", "[3] C"]
 
 
 def test_error_signal_shows_messagebox(qtbot: object, mocker: MockerFixture) -> None:
@@ -136,34 +170,23 @@ def test_error_signal_shows_messagebox(qtbot: object, mocker: MockerFixture) -> 
     assert warning.call_count == 1
 
 
-def test_answer_label_empty_state_shows_hint(qtbot: object, mocker: MockerFixture) -> None:
+def test_answer_list_empty_state_shows_hint(qtbot: object, mocker: MockerFixture) -> None:
     controller = _controller(mocker)
-    controller.state.last_answer = None
+    controller.state.last_results = []
     controller.state.last_question_text = ""
     window = MainWindow(controller, Settings(_env_file=None))  # type: ignore[arg-type]
     qtbot.addWidget(window)  # type: ignore[attr-defined]
 
-    assert (
-        window.answer_label.text(),
-        window.answer_label.property("state"),
-    ) == ("等待作答", "empty")
+    assert window.answer_list.row_texts() == ["等待作答"]
 
 
-def test_answer_label_filled_state_changes_style(qtbot: object, mocker: MockerFixture) -> None:
+def test_answer_list_shows_state_results(qtbot: object, mocker: MockerFixture) -> None:
     controller = _controller(mocker)
+    controller.state.last_results = [_result("3", "B")]
     window = MainWindow(controller, Settings(_env_file=None))  # type: ignore[arg-type]
     qtbot.addWidget(window)  # type: ignore[attr-defined]
-    result = PipelineResult(
-        question=Question(text="What is 1+1?"),
-        answer=Answer(qtype=QuestionType.CHOICE, content="B"),
-    )
 
-    window.bridge.answer_ready.emit(result, False)
-
-    assert (window.answer_label.text(), window.answer_label.property("state")) == (
-        "B",
-        "filled",
-    )
+    assert window.answer_list.row_texts() == ["[3] B"]
 
 
 def test_status_bar_is_chinese(qtbot: object, mocker: MockerFixture) -> None:

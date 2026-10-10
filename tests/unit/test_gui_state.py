@@ -194,12 +194,12 @@ def _broken_controller() -> GuiController:
     )
 
 
-def test_answer_once_without_selected_window_returns_none() -> None:
+def test_answer_once_without_selected_window_returns_empty_list() -> None:
     controller, pipeline, _loop, _presenter = _controller()
 
     result = controller.answer_once()
 
-    assert result is None and pipeline.calls == []
+    assert result == [] and pipeline.calls == []
 
 
 def test_answer_once_with_selected_window_calls_pipeline_and_presenter() -> None:
@@ -208,7 +208,7 @@ def test_answer_once_with_selected_window_calls_pipeline_and_presenter() -> None
 
     result = controller.answer_once()
 
-    assert result is not None and pipeline.calls == [1] and presenter.results[0].answer == result
+    assert len(result) == 1 and pipeline.calls == [1] and presenter.results[0] == result[0]
 
 
 def test_answer_once_with_pipeline_exception_recovers_busy_state() -> None:
@@ -219,7 +219,7 @@ def test_answer_once_with_pipeline_exception_recovers_busy_state() -> None:
 
     result = controller.answer_once()
 
-    assert result is None and controller.state.busy is False
+    assert result == [] and controller.state.busy is False
 
 
 def test_toggle_tts_without_answer_returns_false_and_does_not_start() -> None:
@@ -248,7 +248,7 @@ def test_answer_once_while_busy_returns_none_without_second_call() -> None:
 
     result = controller.answer_once()
 
-    assert result is None and pipeline.calls == []
+    assert result == [] and pipeline.calls == []
 
 
 def test_list_windows_with_exception_returns_empty_list() -> None:
@@ -278,7 +278,7 @@ def test_answer_once_with_none_result_recovers_busy_state() -> None:
 
     result = controller.answer_once()
 
-    assert result is None and controller.state.busy is False
+    assert result == [] and controller.state.busy is False
 
 
 def test_toggle_tts_with_start_exception_returns_false() -> None:
@@ -288,7 +288,12 @@ def test_toggle_tts_with_start_exception_returns_false() -> None:
 
     controller, _pipeline, _loop, _presenter = _controller()
     controller.loop_speaker = BrokenLoop()  # type: ignore[assignment]
-    controller.state.last_answer = Answer(qtype=QuestionType.CHOICE, content="B")
+    controller.state.last_results = [
+        PipelineResult(
+            question=Question(text="q"),
+            answer=Answer(qtype=QuestionType.CHOICE, content="B"),
+        )
+    ]
 
     result = controller.toggle_tts()
 
