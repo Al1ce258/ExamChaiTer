@@ -152,6 +152,7 @@ src/examchaiter/
 │   ├─ config_dialog.py  # 配置对话框（读写 ConfigStore）
 │   ├─ history_dialog.py # 历史面板（session 列表 + 搜索 + 详情）
 │   ├─ autopilot_bridge.py # AutoPilot ↔ Qt Signal 桥接（QObject）
+│   ├─ answer_list.py    # 答案列表控件（QListWidget，供主窗口与历史复用）
 │   └─ state.py
 ├─ pipeline.py      ExamPipeline.run_once() -> list[PipelineResult]
 ├─ app.py           ExamChaiTerApp（pynput 热键 + 主循环）
@@ -228,8 +229,10 @@ class MainWindow(QMainWindow):
 # gui/state.py  ← GUI 测试只测这里
 class GuiController:
     def pick_window(self, title_filter: str) -> WindowInfo | None: ...
-    def answer_once(self) -> Answer | None: ...
+    def answer_once(self) -> list[PipelineResult]   # 变更：返回本帧所有题
     def toggle_tts(self) -> bool: ...
+    # GuiState：last_results: list[PipelineResult]（替换原 last_answer 字段）
+    # 保留 last_answer 为只读快捷访问 = last_results[-1].answer if last_results else None
 ```
 
 **GUI 铁律**：GUI 文件内禁止直接 new OpenAICompatClient / RapidOcrEngine / win32gui 等具体实现，全部从 MainWindow.__init__ 注入。
@@ -415,6 +418,7 @@ class AutoPilotBridge(QObject):
     answer_ready = Signal(object, bool)      # (PipelineResult, from_cache)
     status_message = Signal(str)
     error_occurred = Signal(object)
+    round_done = Signal(list)                # list[PipelineResult]，一轮答案批量刷新
     def make_callbacks(self) -> AutoPilotCallbacks
     # make_callbacks 返回的 callbacks 内部全部走 .emit()，保证跨线程安全
 
@@ -428,7 +432,7 @@ class GuiController:
     def get_config(self) -> AppConfig
     def save_config(self, cfg: AppConfig) -> None       # 调 config_store.save
     def list_sessions(self) -> list[SessionMeta]
-    def load_history(self, session_id: str) -> dict[str, HistoryEntry]
+    def load_history(self, session_id: str) -> list[HistoryEntry]   # 从 dict 改 list（与 storage 一致）
     def search_history(self, keyword: str) -> list[tuple[str, HistoryEntry]]
     def delete_session(self, session_id: str) -> bool
     def start_auto(self, hwnd: int, session_name: str) -> None
@@ -492,7 +496,7 @@ settings          # 隔离的 Settings，全部默认值 + 可覆盖
 | 12    | GUI 大改版 | gui/*.py | Windows 浅色风格（Segoe UI + #0078D4 主色 + 圆角按钮 + 卡片留白）；配置面板读写 %APPDATA%\ExamChaiTer\config.json；历史面板列出/切换/搜索 session；自动模式开关一次进入循环、再点停止；AutoPilot 回调全部经 Qt Signal 回主线程 |
 | 13    | 拆题引擎 + 多题返回 + schema v2 | llm/splitter.py, pipeline.py, storage/* | run_once 返回 list；题号落地；schema v2 |
 | 14    | AutoPilot 适配多题 + 顺序朗读 | autopilot.py, tts/speaker.py | AutoPilot 一帧多题时按题号顺序朗读；朗读期间题目变化 200ms 内中断；LoopSpeaker.wait_done 在读完/stop/超时三种情况下都正确返回 |
-| 15    | GUI 适配多题 | gui/* | 答案列表展示 + 历史按题号 |
+| 15    | GUI 适配多题 | gui/* | 主窗口答案区一次显示 N 条（N=本帧题数），每条带题号；缓存命中行尾灰字；历史对话框表格含题号列且按题号排序；自动模式一帧多题时列表一次性刷新（不是逐条追加） |
 
 每个 Phase 结束打 tag：`v0.1.0-phase<N>`。
 
@@ -590,6 +594,10 @@ Tests: pytest tests/unit/test_xxx.py -q  (N passed)
 
 - LoopSpeaker.wait_done 必须能被 stop() 立刻唤醒，不能只靠 max_repeats 结束
 - AutoPilot 顺序朗读时用 wait_done(timeout=_wait_done_timeout) 兜底，防止 TTS 引擎卡死导致主循环永不前进
+
+### Phase 15 GUI 多答案坑清单
+
+- 答案列表控件必须支持空态与多条目，禁止把答案区做成多行文本（丢题号元数据）
 
 ---
 
