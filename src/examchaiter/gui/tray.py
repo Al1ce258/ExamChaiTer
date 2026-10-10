@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QObject
+from PySide6.QtCore import QObject, QTimer
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QApplication, QMenu, QStyle, QSystemTrayIcon
 
@@ -49,6 +49,9 @@ class TrayController(QObject):
         self.tray.show()
 
     def _answer(self) -> None:
+        QTimer.singleShot(0, self._answer_now)
+
+    def _answer_now(self) -> None:
         self.controller.answer_once()
         self.window._refresh_view()
 
