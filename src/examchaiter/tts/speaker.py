@@ -39,6 +39,9 @@ class LoopSpeaker:
         self.speaker = speaker
         self.interval_s = interval_s
         self._event = threading.Event()
+        self._done_event = threading.Event()
+        self._done_event.set()
+        self._completed: bool | None = None
         self._thread: threading.Thread | None = None
         self._lock = threading.RLock()
 
@@ -46,9 +49,11 @@ class LoopSpeaker:
         with self._lock:
             self._stop_locked()
             self._event = threading.Event()
+            self._completed = None
+            self._done_event.clear()
             self._thread = threading.Thread(
                 target=self._run,
-                args=(text, self._event, max_repeats),
+                args=(text, self._event, max_repeats, self._done_event),
                 daemon=True,
             )
             self._thread.start()
@@ -57,26 +62,55 @@ class LoopSpeaker:
         with self._lock:
             self._stop_locked()
 
+    def wait_done(self, timeout: float | None = None) -> bool:
+        """Block until reading finishes, is stopped, or ``timeout`` elapses.
+
+        Returns ``True`` when the loop finished its repeats (or was never
+        started), and ``False`` when it timed out or ``stop()`` interrupted it.
+        """
+        if not self._done_event.wait(timeout):
+            return False
+        with self._lock:
+            thread = self._thread
+        if thread is not None and thread.is_alive() and thread is not threading.current_thread():
+            thread.join(timeout=1.0)
+        return self._completed is not False
+
     def is_running(self) -> bool:
         with self._lock:
             return self._thread is not None and self._thread.is_alive()
 
     def _stop_locked(self) -> None:
+        if self._thread is not None and self._thread.is_alive():
+            self._completed = False
         self._event.set()
         if self._thread is not None and self._thread.is_alive():
             self._thread.join(timeout=1.0)
         self._thread = None
+        self._done_event.set()
 
-    def _run(self, text: str, event: threading.Event, max_repeats: int | None) -> None:
-        if max_repeats is not None and max_repeats <= 0:
-            return
-        repeats = 0
-        while not event.is_set():
-            self.speaker.speak(text)
-            repeats += 1
-            if max_repeats is not None and repeats >= max_repeats:
+    def _run(
+        self,
+        text: str,
+        event: threading.Event,
+        max_repeats: int | None,
+        done_event: threading.Event,
+    ) -> None:
+        try:
+            if max_repeats is not None and max_repeats <= 0:
+                self._completed = True
                 return
-            event.wait(self.interval_s)
+            repeats = 0
+            while not event.is_set():
+                self.speaker.speak(text)
+                repeats += 1
+                if max_repeats is not None and repeats >= max_repeats:
+                    break
+                event.wait(self.interval_s)
+            if not event.is_set():
+                self._completed = True
+        finally:
+            done_event.set()
 
 
 class Pyttsx3Speaker:

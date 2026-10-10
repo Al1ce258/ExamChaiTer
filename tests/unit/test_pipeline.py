@@ -12,7 +12,7 @@ from examchaiter.models import OcrBlock, SplitQuestion
 from examchaiter.ocr.engine import FakeOcrEngine
 from examchaiter.pipeline import ExamPipeline
 from examchaiter.storage.hashing import question_hash
-from examchaiter.storage.history_store import HistoryEntry
+from examchaiter.storage.history_store import HistoryEntry, NullHistoryStore
 
 _QUESTION_TEXT = "示例题目 1+1=?"
 
@@ -247,7 +247,7 @@ def _pipeline(
     llm: object | None = None,
     settings: Settings | None = None,
     splitter: FakeSplitter | None = None,
-    history: FakeHistory | None = None,
+    history: FakeHistory | NullHistoryStore | None = None,
     session_id: str = "",
 ) -> ExamPipeline:
     selected_llm = llm or FakeLLMClient(responses=['{"type":"choice","answer":"B"}'])
@@ -262,7 +262,7 @@ def _pipeline(
         llm=selected_llm,  # type: ignore[arg-type]
         settings=selected_settings,
         splitter=actual_splitter,  # type: ignore[arg-type]
-        history_store=history,  # type: ignore[arg-type]
+        history_store=history or NullHistoryStore(),
         session_id=session_id,
         _clock=mocker.Mock(return_value=1.0),
         _sleep=mocker.Mock(),

@@ -9,7 +9,7 @@ import time
 from dataclasses import asdict, dataclass, fields
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from loguru import logger
 
@@ -45,6 +45,16 @@ class SessionMeta:
     name: str
     created_at: float
     question_count: int
+
+
+class HistoryStoreLike(Protocol):
+    """Minimal history surface required by the answer engines."""
+
+    def find_by_hash(self, session_id: str, qhash: str) -> HistoryEntry | None: ...
+
+    def add_or_update_entry(
+        self, session_id: str, entry: HistoryEntry, *, flush_now: bool = False
+    ) -> None: ...
 
 
 @dataclass
@@ -293,3 +303,47 @@ class HistoryStore:
             {"sessions": [asdict(meta) for meta in metas]}, ensure_ascii=False, indent=2
         )
         _atomic_write_text(self._index_path, text)
+
+
+class NullHistoryStore:
+    """No-op store for explicit "answer without persistence" runs."""
+
+    def __init__(self, base_dir: Path | None = None) -> None:
+        self._base_dir = Path(base_dir) if base_dir is not None else ConfigStore.default_base_dir()
+
+    @property
+    def base_dir(self) -> Path:
+        return self._base_dir
+
+    def list_sessions(self) -> list[SessionMeta]:
+        return []
+
+    def create_session(self, name: str) -> SessionMeta:
+        session_id = _sanitize_name(name) or "null-session"
+        return SessionMeta(session_id, session_id, 0.0, 0)
+
+    def load_session(self, session_id: str) -> list[HistoryEntry]:
+        return []
+
+    def get_index(self, session_id: str) -> dict[str, HistoryEntry]:
+        return {}
+
+    def find_by_hash(self, session_id: str, qhash: str) -> HistoryEntry | None:
+        return None
+
+    def add_or_update_entry(
+        self, session_id: str, entry: HistoryEntry, *, flush_now: bool = False
+    ) -> None:
+        return None
+
+    def rename_session(self, session_id: str, new_name: str) -> bool:
+        return False
+
+    def delete_session(self, session_id: str) -> bool:
+        return False
+
+    def search(self, keyword: str, limit: int = 50) -> list[tuple[str, HistoryEntry]]:
+        return []
+
+    def flush(self) -> None:
+        return None

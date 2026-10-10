@@ -146,6 +146,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         from examchaiter.ocr.engine import FakeOcrEngine, OcrEngine, RapidOcrEngine
         from examchaiter.output import Presenter
         from examchaiter.pipeline import Capture, ExamPipeline
+        from examchaiter.storage.history_store import NullHistoryStore
 
         settings = Settings()
         hwnd = 1
@@ -207,6 +208,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             llm=llm,
             settings=settings,
             splitter=QuestionSplitter(llm, settings),
+            history_store=NullHistoryStore(),
+            session_id="",
             _sleep=time.sleep if args.real else lambda _delay: None,
         )
         results = pipeline.run_once(hwnd)
@@ -424,6 +427,7 @@ def _run_gui(*, fake: bool) -> int:
     from examchaiter.output import Presenter
     from examchaiter.pipeline import ExamPipeline
     from examchaiter.storage import ConfigStore, HistoryStore
+    from examchaiter.storage.history_store import NullHistoryStore
     from examchaiter.tts import FakeSpeaker, LoopSpeaker, Pyttsx3Speaker
 
     config_store = ConfigStore()
@@ -524,6 +528,8 @@ def _run_gui(*, fake: bool) -> int:
                 llm=llm,
                 settings=settings,
                 splitter=QuestionSplitter(llm, settings),
+                history_store=NullHistoryStore(),
+                session_id="",
             )
 
         pipeline_factory = build_exam_pipeline

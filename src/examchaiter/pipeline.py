@@ -21,7 +21,7 @@ from examchaiter.models import Answer, PipelineResult, Question, QuestionType, S
 from examchaiter.ocr.engine import OcrEngine
 from examchaiter.ocr.layout import blocks_to_text
 from examchaiter.storage.hashing import question_hash
-from examchaiter.storage.history_store import HistoryEntry, HistoryStore
+from examchaiter.storage.history_store import HistoryEntry, HistoryStoreLike
 
 ImageArray = NDArray[np.uint8]
 WindowRect = tuple[int, int, int, int]
@@ -49,8 +49,8 @@ class ExamPipeline:
         llm: LLMClient,
         settings: Settings,
         splitter: QuestionSplitter,
-        history_store: HistoryStore | None = None,
-        session_id: str = "",
+        history_store: HistoryStoreLike,
+        session_id: str,
         _clock: Callable[[], float] | None = None,
         _sleep: Callable[[float], None] = time.sleep,
     ) -> None:
@@ -166,8 +166,6 @@ class ExamPipeline:
         )
 
     def _find_cached(self, qhash: str) -> HistoryEntry | None:
-        if self.history_store is None or not self.session_id:
-            return None
         try:
             return self.history_store.find_by_hash(self.session_id, qhash)
         except Exception:
@@ -181,8 +179,6 @@ class ExamPipeline:
         answer: Answer,
         started_at: float,
     ) -> None:
-        if self.history_store is None or not self.session_id:
-            return
         try:
             self.history_store.add_or_update_entry(
                 self.session_id,

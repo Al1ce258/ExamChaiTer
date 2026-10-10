@@ -13,7 +13,7 @@ import pytest
 
 from examchaiter.errors import StorageError
 from examchaiter.storage import history_store as history_store_module
-from examchaiter.storage.history_store import HistoryEntry, HistoryStore
+from examchaiter.storage.history_store import HistoryEntry, HistoryStore, NullHistoryStore
 
 
 def _entry(
@@ -48,6 +48,30 @@ def test_create_session_with_empty_name_uses_date_format(tmp_path: Path) -> None
     meta = HistoryStore(tmp_path).create_session("")
 
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}-\d{4}", meta.session_id)
+
+
+def test_null_history_store_is_a_noop(tmp_path: Path) -> None:
+    store = NullHistoryStore(base_dir=tmp_path)
+    meta = store.create_session("draft")
+    store.add_or_update_entry(meta.session_id, _entry("h1"), flush_now=True)
+    store.flush()
+
+    assert (
+        store.base_dir,
+        store.list_sessions(),
+        store.load_session(meta.session_id),
+        store.get_index(meta.session_id),
+        store.find_by_hash(meta.session_id, "h1"),
+        store.search("题目"),
+        store.rename_session(meta.session_id, "x"),
+        store.delete_session(meta.session_id),
+    ) == (tmp_path, [], [], {}, None, [], False, False)
+
+
+def test_null_history_store_with_empty_name_uses_fallback(tmp_path: Path) -> None:
+    meta = NullHistoryStore(base_dir=tmp_path).create_session("")
+
+    assert meta.session_id == "null-session"
 
 
 def test_create_session_with_duplicate_name_appends_suffix(tmp_path: Path) -> None:

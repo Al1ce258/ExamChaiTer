@@ -27,6 +27,7 @@ from examchaiter.ocr.engine import RapidOcrEngine
 from examchaiter.output.formatter import to_speech_text
 from examchaiter.output.presenter import Presenter
 from examchaiter.pipeline import ExamPipeline
+from examchaiter.storage.history_store import NullHistoryStore
 from examchaiter.tts.speaker import LoopSpeaker, Pyttsx3Speaker
 
 HotkeyCallback = Callable[[], None]
@@ -210,4 +211,6 @@ def _build_pipeline(settings: Settings) -> ExamPipeline:
         llm=llm,
         settings=settings,
         splitter=QuestionSplitter(llm, settings),
+        history_store=NullHistoryStore(),
+        session_id="",
     )

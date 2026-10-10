@@ -213,3 +213,50 @@ def test_loop_speaker_max_repeats_none_is_infinite() -> None:
     loop.stop()
 
     assert running is True and len(speaker.spoken) >= 2
+
+
+def test_wait_done_returns_true_after_max_repeats() -> None:
+    loop = LoopSpeaker(FakeSpeaker(), interval_s=0.01)
+
+    loop.start("repeat", max_repeats=2)
+
+    assert loop.wait_done(timeout=1.0) is True
+
+
+def test_wait_done_returns_immediately_when_not_started() -> None:
+    assert LoopSpeaker(FakeSpeaker()).wait_done(timeout=0.1) is True
+
+
+def test_wait_done_wakes_up_on_stop() -> None:
+    loop = LoopSpeaker(FakeSpeaker(), interval_s=0.01)
+    loop.start("repeat")
+    time.sleep(0.05)
+
+    started = time.monotonic()
+    loop.stop()
+    result = loop.wait_done(timeout=1.0)
+    elapsed = time.monotonic() - started
+
+    assert result is False and elapsed < 0.2
+
+
+def test_wait_done_timeout_returns_false() -> None:
+    loop = LoopSpeaker(FakeSpeaker(), interval_s=0.01)
+    loop.start("repeat")
+
+    result = loop.wait_done(timeout=0.1)
+    running = loop.is_running()
+    loop.stop()
+
+    assert (result, running) == (False, True)
+
+
+def test_wait_done_does_not_leak_threads() -> None:
+    loop = LoopSpeaker(FakeSpeaker(), interval_s=0.001)
+    before = threading.active_count()
+
+    for _ in range(3):
+        loop.start("repeat", max_repeats=1)
+        assert loop.wait_done(timeout=1.0) is True
+
+    assert threading.active_count() <= before
