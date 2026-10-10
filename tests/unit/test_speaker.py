@@ -41,6 +41,16 @@ def test_loop_speaker_after_stop_is_not_running() -> None:
     assert loop.is_running() is False
 
 
+def test_loop_speaker_stop_calls_underlying_speaker_stop() -> None:
+    speaker = FakeSpeaker()
+    loop = LoopSpeaker(speaker, interval_s=0.01)
+    loop.start("repeat")
+
+    loop.stop()
+
+    assert len(speaker.stopped) == 1
+
+
 def test_loop_speaker_after_stop_does_not_grow_spoken() -> None:
     speaker = FakeSpeaker()
     loop = LoopSpeaker(speaker, interval_s=0.01)
@@ -125,11 +135,14 @@ def test_pyttsx3_speaker_with_fake_module_speaks_and_stops(
     monkeypatch.setitem(sys.modules, "pyttsx3", module)
     speaker = Pyttsx3Speaker()
 
-    speaker.speak("hello")
+    worker = threading.Thread(target=speaker.speak, args=("hello",), daemon=True)
+    worker.start()
     started.wait(0.5)
+    assert worker.is_alive() is True
     speaker.stop()
+    worker.join(0.5)
 
-    assert spoken == ["hello"] and stopped.is_set()
+    assert spoken == ["hello"] and stopped.is_set() and worker.is_alive() is False
 
 
 def test_pyttsx3_speaker_with_say_failure_disables_after_first_attempt(

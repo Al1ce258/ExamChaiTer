@@ -85,6 +85,7 @@ class LoopSpeaker:
             self._completed = False
         self._event.set()
         if self._thread is not None and self._thread.is_alive():
+            self.speaker.stop()
             self._thread.join(timeout=1.0)
         self._thread = None
         self._done_event.set()
@@ -130,7 +131,7 @@ class Pyttsx3Speaker:
     def speak(self, text: str) -> None:
         if self._disabled:
             return
-        threading.Thread(target=self._speak_in_thread, args=(text,), daemon=True).start()
+        self._speak(text)
 
     def stop(self) -> None:
         with self._engine_lock:
@@ -140,7 +141,7 @@ class Pyttsx3Speaker:
         with suppress(Exception):
             engine.stop()
 
-    def _speak_in_thread(self, text: str) -> None:
+    def _speak(self, text: str) -> None:
         if self._disabled:
             return
         engine: Any = None
