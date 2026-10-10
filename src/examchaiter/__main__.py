@@ -224,8 +224,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             Presenter(settings, _printer=_prefixed_printer(prefix)).show(result)
 
     if args.command == "speak":
-        import time
-
         from examchaiter.tts import FakeSpeaker, LoopSpeaker, Pyttsx3Speaker, Speaker
 
         speaker: Speaker
@@ -243,14 +241,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             speaker = FakeSpeaker()
 
         loop = LoopSpeaker(speaker, interval_s=args.interval)
-        loop.start(args.text)
-        if isinstance(speaker, FakeSpeaker):
-            deadline = time.monotonic() + args.interval * args.loops + 0.2
-            poll_interval = max(0.001, min(0.01, args.interval / 2 or 0.01))
-            while len(speaker.spoken) < args.loops and time.monotonic() < deadline:
-                time.sleep(poll_interval)
-        else:
-            time.sleep(args.interval * max(0, args.loops - 1))
+        loop.start(args.text, max_repeats=args.loops)
+        loop.wait_done(timeout=args.interval * args.loops + 5.0)
         loop.stop()
 
         reconfigure = getattr(sys.stdout, "reconfigure", None)
