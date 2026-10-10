@@ -134,3 +134,52 @@ def test_error_signal_shows_messagebox(qtbot: object, mocker: MockerFixture) -> 
     window.bridge.error_occurred.emit(RuntimeError("boom"))
 
     assert warning.call_count == 1
+
+
+def test_answer_label_empty_state_shows_hint(qtbot: object, mocker: MockerFixture) -> None:
+    controller = _controller(mocker)
+    controller.state.last_answer = None
+    controller.state.last_question_text = ""
+    window = MainWindow(controller, Settings(_env_file=None))  # type: ignore[arg-type]
+    qtbot.addWidget(window)  # type: ignore[attr-defined]
+
+    assert (
+        window.answer_label.text(),
+        window.answer_label.property("state"),
+    ) == ("等待作答", "empty")
+
+
+def test_answer_label_filled_state_changes_style(qtbot: object, mocker: MockerFixture) -> None:
+    controller = _controller(mocker)
+    window = MainWindow(controller, Settings(_env_file=None))  # type: ignore[arg-type]
+    qtbot.addWidget(window)  # type: ignore[attr-defined]
+    result = PipelineResult(
+        question=Question(text="What is 1+1?"),
+        answer=Answer(qtype=QuestionType.CHOICE, content="B"),
+    )
+
+    window.bridge.answer_ready.emit(result, False)
+
+    assert (window.answer_label.text(), window.answer_label.property("state")) == (
+        "B",
+        "filled",
+    )
+
+
+def test_status_bar_is_chinese(qtbot: object, mocker: MockerFixture) -> None:
+    controller = _controller(mocker)
+    window = MainWindow(controller, Settings(_env_file=None))  # type: ignore[arg-type]
+    qtbot.addWidget(window)  # type: ignore[attr-defined]
+    messages: dict[str, str] = {}
+
+    for state in ("idle", "running", "stopping", "stopped", "error"):
+        window.bridge.state_changed.emit(state)
+        messages[state] = window.statusBar().currentMessage()
+
+    assert messages == {
+        "idle": "就绪",
+        "running": "自动模式运行中",
+        "stopping": "正在停止…",
+        "stopped": "自动模式已停止",
+        "error": "错误",
+    }

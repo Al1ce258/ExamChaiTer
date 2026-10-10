@@ -1,17 +1,17 @@
-"""Main application window for ExamChaiTer."""
+"""Main application window for ExamChaiTer (Windows 11 light layout)."""
 
 from __future__ import annotations
 
 from typing import cast
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtGui import QCloseEvent, QColor
 from PySide6.QtWidgets import (
     QApplication,
-    QCheckBox,
     QComboBox,
     QDialog,
     QFrame,
+    QGraphicsDropShadowEffect,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -29,6 +29,23 @@ from examchaiter.gui.history_dialog import HistoryDialog
 from examchaiter.gui.state import GuiController
 from examchaiter.gui.style import apply_style
 from examchaiter.models import PipelineResult
+
+_EMPTY_HINT = "等待作答"
+_STATUS_TEXT = {
+    "idle": "就绪",
+    "running": "自动模式运行中",
+    "stopping": "正在停止…",
+    "stopped": "自动模式已停止",
+    "error": "错误",
+}
+
+
+def _add_shadow(widget: QWidget, blur: int, dy: int, alpha: int) -> None:
+    effect = QGraphicsDropShadowEffect(widget)
+    effect.setBlurRadius(blur)
+    effect.setOffset(0, dy)
+    effect.setColor(QColor(0, 0, 0, alpha))
+    widget.setGraphicsEffect(effect)
 
 
 class MainWindow(QMainWindow):
@@ -54,48 +71,20 @@ class MainWindow(QMainWindow):
         self.bridge = AutoPilotBridge(self)
         controller.autopilot_callbacks = self.bridge.make_callbacks()
 
-        self.window_combo = QComboBox()
-        self.refresh_button = QPushButton("刷新")
-        self.config_button = QPushButton("配置")
-        self.history_button = QPushButton("历史")
-        toolbar = QHBoxLayout()
-        toolbar.addWidget(self.window_combo, 1)
-        toolbar.addWidget(self.refresh_button)
-        toolbar.addWidget(self.config_button)
-        toolbar.addWidget(self.history_button)
-
-        self.preview_edit = QPlainTextEdit()
-        self.preview_edit.setReadOnly(True)
-        self.answer_label = QLabel("—")
-        self.answer_label.setObjectName("answerLabel")
-        self.answer_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        middle = QHBoxLayout()
-        middle.addWidget(self._card("题目预览", self.preview_edit), 1)
-        middle.addWidget(self._card("答案", self.answer_label), 1)
-
-        self.answer_button = QPushButton("作答一次")
-        self.answer_button.setObjectName("primaryButton")
-        self.toggle_button = QPushButton("开始朗读")
-        self.toggle_button.setObjectName("secondaryButton")
-        self.auto_checkbox = QCheckBox("自动模式")
-        self.quit_button = QPushButton("退出")
-        bottom = QHBoxLayout()
-        bottom.addWidget(self.answer_button)
-        bottom.addWidget(self.toggle_button)
-        bottom.addWidget(self.auto_checkbox)
-        bottom.addStretch(1)
-        bottom.addWidget(self.quit_button)
+        top_bar = self._build_top_bar()
+        middle = self._build_cards()
+        bottom_bar = self._build_bottom_bar()
 
         central = QWidget()
         central.setObjectName("centralWidget")
         layout = QVBoxLayout(central)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(12)
-        layout.addLayout(toolbar)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(16)
+        layout.addWidget(top_bar)
         layout.addLayout(middle, 1)
-        layout.addLayout(bottom)
+        layout.addWidget(bottom_bar)
         self.setCentralWidget(central)
-        self.statusBar().showMessage("就绪")
+        self.statusBar().showMessage(self._format_status("idle"))
 
         self.refresh_button.clicked.connect(self.refresh_windows)
         self.window_combo.currentIndexChanged.connect(self._on_window_changed)
@@ -113,13 +102,81 @@ class MainWindow(QMainWindow):
         self.refresh_windows()
         self._refresh_view()
 
+    def _build_top_bar(self) -> QFrame:
+        self.window_combo = QComboBox()
+        self.refresh_button = QPushButton("刷新")
+        self.config_button = QPushButton("配置")
+        self.history_button = QPushButton("历史")
+        for button in (self.refresh_button, self.config_button, self.history_button):
+            button.setProperty("class", "secondary")
+            button.setMinimumWidth(80)
+        search_icon = QLabel("🔍")
+        search_icon.setObjectName("SearchIcon")
+
+        top_bar = QFrame()
+        top_bar.setObjectName("TopBar")
+        layout = QHBoxLayout(top_bar)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(10)
+        layout.addWidget(search_icon)
+        layout.addWidget(self.window_combo, 1)
+        layout.addWidget(self.refresh_button)
+        layout.addWidget(self.config_button)
+        layout.addWidget(self.history_button)
+        _add_shadow(top_bar, blur=8, dy=1, alpha=25)
+        return top_bar
+
+    def _build_cards(self) -> QHBoxLayout:
+        self.preview_edit = QPlainTextEdit()
+        self.preview_edit.setObjectName("question_view")
+        self.preview_edit.setReadOnly(True)
+        self.answer_label = QLabel(_EMPTY_HINT)
+        self.answer_label.setObjectName("AnswerDisplay")
+        self.answer_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.answer_label.setWordWrap(True)
+        self.answer_label.setProperty("state", "empty")
+
+        preview_card = self._card("题目预览", self.preview_edit)
+        answer_card = self._card("答案", self.answer_label)
+        _add_shadow(preview_card, blur=18, dy=2, alpha=22)
+        _add_shadow(answer_card, blur=18, dy=2, alpha=22)
+
+        middle = QHBoxLayout()
+        middle.setSpacing(16)
+        middle.addWidget(preview_card, 5)
+        middle.addWidget(answer_card, 4)
+        return middle
+
+    def _build_bottom_bar(self) -> QFrame:
+        self.answer_button = QPushButton("作答一次")
+        self.answer_button.setProperty("class", "primary")
+        self.toggle_button = QPushButton("开始朗读")
+        self.toggle_button.setProperty("class", "secondary")
+        self.auto_checkbox = QPushButton("自动模式")
+        self.auto_checkbox.setCheckable(True)
+        self.auto_checkbox.setProperty("class", "toggle")
+        self.quit_button = QPushButton("退出")
+        self.quit_button.setProperty("class", "danger")
+
+        bottom_bar = QFrame()
+        bottom_bar.setObjectName("BottomBar")
+        layout = QHBoxLayout(bottom_bar)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(10)
+        layout.addWidget(self.answer_button)
+        layout.addWidget(self.toggle_button)
+        layout.addWidget(self.auto_checkbox)
+        layout.addStretch(1)
+        layout.addWidget(self.quit_button)
+        return bottom_bar
+
     def _card(self, title: str, content: QWidget) -> QFrame:
         card = QFrame()
-        card.setObjectName("card")
+        card.setObjectName("CardFrame")
         title_label = QLabel(title)
-        title_label.setObjectName("cardTitle")
+        title_label.setObjectName("CardTitle")
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(8)
         layout.addWidget(title_label)
         layout.addWidget(content, 1)
@@ -173,11 +230,11 @@ class MainWindow(QMainWindow):
 
     def _on_auto_state(self, state_value: str) -> None:
         self._set_auto_checked(state_value == "running")
-        self.statusBar().showMessage(f"自动模式：{state_value}")
+        self.statusBar().showMessage(self._format_status(state_value))
 
     def _on_answer_ready(self, result: PipelineResult, from_cache: bool) -> None:
         self.preview_edit.setPlainText(result.question.text)
-        self.answer_label.setText(result.answer.content)
+        self._set_answer_text(result.answer.content)
         suffix = "（缓存）" if from_cache else ""
         self.statusBar().showMessage(f"已作答{suffix}")
 
@@ -192,14 +249,24 @@ class MainWindow(QMainWindow):
         self.auto_checkbox.setChecked(checked)
         self.auto_checkbox.blockSignals(False)
 
+    def _set_answer_text(self, text: str) -> None:
+        has_answer = bool(text)
+        self.answer_label.setText(text if has_answer else _EMPTY_HINT)
+        self.answer_label.setProperty("state", "filled" if has_answer else "empty")
+        self._repolish(self.answer_label)
+
     def _refresh_view(self) -> None:
         state = self.controller.state
         self.preview_edit.setPlainText(state.last_question_text)
-        self.answer_label.setText(state.last_answer.content if state.last_answer else "—")
+        self._set_answer_text(state.last_answer.content if state.last_answer else "")
         running = self.controller.is_tts_running()
         self.toggle_button.setText("停止朗读" if running else "开始朗读")
-        self.toggle_button.setObjectName("primaryButton" if running else "secondaryButton")
+        self.toggle_button.setProperty("class", "primary" if running else "secondary")
         self._repolish(self.toggle_button)
+
+    @staticmethod
+    def _format_status(state: str) -> str:
+        return _STATUS_TEXT.get(state, state)
 
     @staticmethod
     def _repolish(widget: QWidget) -> None:
