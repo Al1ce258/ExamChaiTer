@@ -1,4 +1,4 @@
-"""AutoPilot engine: watch a window, answer stable frames, and loop-speak answers.
+"""AutoPilot engine: watch a window, split questions, and read answers in order.
 
 The engine is pure Python logic: every dependency is injected and the outside
 world is notified through callbacks. It never imports Qt, win32gui, or pynput.
@@ -17,12 +17,13 @@ from loguru import logger
 
 from examchaiter.llm.client import LLMClient
 from examchaiter.llm.prompts import build_messages, parse_answer
-from examchaiter.models import Answer, PipelineResult, Question, QuestionType
+from examchaiter.llm.splitter import QuestionSplitter
+from examchaiter.models import Answer, PipelineResult, Question, QuestionType, SplitQuestion
 from examchaiter.ocr.engine import OcrEngine
 from examchaiter.ocr.layout import blocks_to_text
 from examchaiter.output.formatter import to_speech_text
 from examchaiter.storage.hashing import question_hash
-from examchaiter.storage.history_store import HistoryEntry, HistoryStore
+from examchaiter.storage.history_store import HistoryEntry, HistoryStoreLike
 from examchaiter.tts.speaker import LoopSpeaker
 
 
@@ -51,10 +52,15 @@ class AutoPilotConfig:
     poll_interval: float = 1.5
     stable_frames: int = 2
     speak_choice_repeat: int = 5
+    speak_multi_choice_repeat: int = 5
     speak_fill_repeat: int = 3
     speak_short_repeat: int = 1
     speak_interval: float = 3.0
     min_text_len: int = 20
+
+
+def _noop_round(_results: list[PipelineResult]) -> None:
+    return None
 
 
 @dataclass
@@ -65,33 +71,38 @@ class AutoPilotCallbacks:
     on_answer: Callable[[PipelineResult, bool], None]
     on_status: Callable[[str], None]
     on_error: Callable[[Exception], None]
+    on_round_done: Callable[[list[PipelineResult]], None] = _noop_round
 
 
 class AutoPilot:
-    """Poll a window and answer once each time a new stable frame appears."""
+    """Poll a window and answer/speak once each time a new stable frame appears."""
 
     def __init__(
         self,
         capture: AutoPilotCapture,
         ocr: OcrEngine,
         llm: LLMClient,
+        splitter: QuestionSplitter,
         loop_speaker: LoopSpeaker,
-        history_store: HistoryStore,
+        history_store: HistoryStoreLike,
         session_id: str,
         config: AutoPilotConfig,
         callbacks: AutoPilotCallbacks,
         *,
         _sleep: Callable[[float], None] | None = None,
+        _wait_done_timeout: float = 30.0,
     ) -> None:
         self._capture = capture
         self._ocr = ocr
         self._llm = llm
+        self._splitter = splitter
         self._loop_speaker = loop_speaker
         self._history = history_store
         self._session_id = session_id
         self._config = config
         self._callbacks = callbacks
         self._sleep: Callable[[float], None] = _sleep if _sleep is not None else self._wait_interval
+        self._wait_done_timeout = _wait_done_timeout
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._lock = threading.RLock()
@@ -133,6 +144,7 @@ class AutoPilot:
                 self._set_state(AutoPilotState.STOPPING)
             self._stop_event.set()
             thread = self._thread
+        self._loop_speaker.stop()
         if thread is not None:
             thread.join(timeout)
         with self._lock:
@@ -161,36 +173,65 @@ class AutoPilot:
         if self._stable_count < max(1, self._config.stable_frames) or self._has_answered:
             return
 
-        blocks = self._ocr.recognize(image)
-        text = blocks_to_text(blocks)
+        text = blocks_to_text(self._ocr.recognize(image))
         if len(text) < self._config.min_text_len:
             self._emit(self._callbacks.on_status, "文本过短，跳过本轮")
             return
 
-        result, from_cache = self._resolve_answer(text)
-        self._has_answered = True
-        self._emit(self._callbacks.on_answer, result, from_cache)
-        self._speak(result.answer)
+        questions = self._splitter.split(text)
+        if not questions:
+            self._emit(self._callbacks.on_status, "未拆出题目，跳过本轮")
+            return
 
-    def _resolve_answer(self, text: str) -> tuple[PipelineResult, bool]:
-        qhash = question_hash(text)
-        entry = self._history.find_by_hash(self._session_id, qhash)
+        results = self._answer_questions(questions)
+        self._emit(self._callbacks.on_round_done, results)
+        if self._speak_round(results, hwnd, image_hash):
+            self._has_answered = True
+
+    def _answer_questions(self, questions: list[SplitQuestion]) -> list[PipelineResult]:
+        results: list[PipelineResult] = []
+        for question in questions:
+            result, from_cache = self._resolve_answer(question)
+            results.append(result)
+            self._emit(self._callbacks.on_answer, result, from_cache)
+        return results
+
+    def _resolve_answer(self, split_question: SplitQuestion) -> tuple[PipelineResult, bool]:
+        text = split_question.text
+        qhash = question_hash(f"{split_question.question_no}|{text}")
+        entry = self._find_cached(qhash)
         if entry is not None:
-            answer = Answer(
-                qtype=QuestionType(entry.answer_qtype),
-                content=entry.answer_content,
-            )
+            answer = Answer(qtype=_safe_qtype(entry.answer_qtype), content=entry.answer_content)
             from_cache = True
             self._emit(self._callbacks.on_status, "缓存命中")
         else:
             raw = self._llm.complete(build_messages(text), json_mode=True)
             answer = parse_answer(raw)
             from_cache = False
+            self._store_answer(split_question, qhash, answer)
+        result = PipelineResult(
+            question=Question(text=text),
+            answer=answer,
+            reused=from_cache,
+            question_no=split_question.question_no,
+        )
+        return result, from_cache
+
+    def _find_cached(self, qhash: str) -> HistoryEntry | None:
+        try:
+            return self._history.find_by_hash(self._session_id, qhash)
+        except Exception:
+            logger.warning("历史缓存查询失败，忽略缓存")
+            return None
+
+    def _store_answer(self, split_question: SplitQuestion, qhash: str, answer: Answer) -> None:
+        try:
             self._history.add_or_update_entry(
                 self._session_id,
                 HistoryEntry(
+                    question_no=split_question.question_no,
                     question_hash=qhash,
-                    question_text=text,
+                    question_text=split_question.text,
                     answer_qtype=answer.qtype.value,
                     answer_content=answer.content,
                     model=str(getattr(self._llm, "model", "")),
@@ -199,18 +240,45 @@ class AutoPilot:
                 ),
                 flush_now=True,
             )
-        # Question has no hash field (models.py is frozen); qhash only keys history.
-        result = PipelineResult(question=Question(text=text), answer=answer, reused=from_cache)
-        return result, from_cache
+        except Exception:
+            logger.exception("历史写入失败")
 
-    def _speak(self, answer: Answer) -> None:
-        repeats = self._repeat_for(answer.qtype)
+    def _speak_round(self, results: list[PipelineResult], hwnd: int, frame_hash: int) -> bool:
+        """Read ``results`` in order; ``False`` means interrupted before the end."""
         self._loop_speaker.stop()
-        self._loop_speaker.start(to_speech_text(answer), max_repeats=repeats)
+        for index, result in enumerate(results):
+            if self._stop_event.is_set():
+                return False
+            self._loop_speaker.start(
+                self._speech_text(result, index),
+                max_repeats=self._repeat_for(result.answer.qtype),
+            )
+            if not self._loop_speaker.wait_done(timeout=self._wait_done_timeout):
+                return False
+            if self._stop_event.is_set():
+                return False
+            if self._frame_changed(hwnd, frame_hash):
+                self._loop_speaker.stop()
+                return False
+        return True
+
+    def _frame_changed(self, hwnd: int, frame_hash: int) -> bool:
+        try:
+            return self._capture.dhash(self._capture.grab_window(hwnd)) != frame_hash
+        except Exception:
+            logger.warning("朗读期间帧检测失败，按已变化处理")
+            return True
+
+    def _speech_text(self, result: PipelineResult, index: int) -> str:
+        body = to_speech_text(result.answer)
+        if result.question_no:
+            return body
+        return f"第 {index + 1} 题，{body}"
 
     def _repeat_for(self, qtype: QuestionType) -> int:
         repeats = {
             QuestionType.CHOICE: self._config.speak_choice_repeat,
+            QuestionType.MULTI_CHOICE: self._config.speak_multi_choice_repeat,
             QuestionType.FILL: self._config.speak_fill_repeat,
             QuestionType.SHORT: self._config.speak_short_repeat,
         }
@@ -231,3 +299,10 @@ class AutoPilot:
             callback(*args)
         except Exception:
             logger.exception("AutoPilot callback raised; ignored")
+
+
+def _safe_qtype(value: str) -> QuestionType:
+    try:
+        return QuestionType(value)
+    except ValueError:
+        return QuestionType.UNKNOWN

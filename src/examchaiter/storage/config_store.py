@@ -64,6 +64,7 @@ class AppConfig:
     auto_poll_interval: float = 1.5
     auto_stable_frames: int = 2
     auto_speak_choice_repeat: int = 5
+    auto_speak_multi_choice_repeat: int = 5
     auto_speak_fill_repeat: int = 3
     auto_speak_short_repeat: int = 1
     auto_speak_interval: float = 3.0

@@ -326,7 +326,9 @@ def _run_autopilot_dry_run(*, frames: int, session: str) -> int:
         AutoPilotCallbacks,
         AutoPilotConfig,
     )
+    from examchaiter.config import Settings
     from examchaiter.llm import FakeLLMClient
+    from examchaiter.llm.splitter import QuestionSplitter
     from examchaiter.models import OcrBlock
     from examchaiter.ocr import FakeOcrEngine
     from examchaiter.storage.history_store import HistoryStore
@@ -334,22 +336,27 @@ def _run_autopilot_dry_run(*, frames: int, session: str) -> int:
 
     frame_limit = max(1, frames)
 
+    settings_overrides: dict[str, Any] = {"_env_file": None}
+    dry_run_settings = Settings(**settings_overrides)
+
     reconfigure = getattr(sys.stdout, "reconfigure", None)
     if reconfigure is not None:
         reconfigure(encoding="utf-8")
 
     class DryRunCapture:
-        """Serves hash A on the first two frames, then hash B."""
+        """Serves hash A in phase 0, hash B afterwards (advanced by the driver)."""
 
         def __init__(self) -> None:
-            self.frames_served = 0
+            self.phase = 0
 
-        def grab_window(self, _hwnd: int) -> int:
-            self.frames_served += 1
-            return self.frames_served
+        def advance(self) -> None:
+            self.phase += 1
 
-        def dhash(self, image: Any) -> int:
-            return 1 if int(image) <= 2 else 2
+        def grab_window(self, _hwnd: int) -> Any:
+            return object()
+
+        def dhash(self, _image: Any) -> int:
+            return 1 if self.phase == 0 else 2
 
     capture = DryRunCapture()
     ocr = FakeOcrEngine(
@@ -361,7 +368,12 @@ def _run_autopilot_dry_run(*, frames: int, session: str) -> int:
             )
         ]
     )
-    llm = FakeLLMClient(responses=['{"type":"choice","answer":"B"}'])
+    llm = FakeLLMClient(
+        responses=[
+            '[{"no": "", "text": "示例题目：1+1=? 请从下列选项中选择正确答案。"}]',
+            '{"type":"choice","answer":"B"}',
+        ]
+    )
     speaker = FakeSpeaker()
     loop_speaker = LoopSpeaker(speaker, interval_s=0.01)
     store = HistoryStore(base_dir=Path(tempfile.mkdtemp()))
@@ -371,16 +383,19 @@ def _run_autopilot_dry_run(*, frames: int, session: str) -> int:
     answers: list[bool] = []
     statuses: list[str] = []
     errors: list[str] = []
+    rounds: list[list[Any]] = []
     callbacks = AutoPilotCallbacks(
         on_state=lambda state: states.append(state.value),
         on_answer=lambda _result, from_cache: answers.append(from_cache),
         on_status=statuses.append,
         on_error=lambda exc: errors.append(repr(exc)),
+        on_round_done=rounds.append,
     )
     autopilot = AutoPilot(
         capture=capture,
         ocr=ocr,
         llm=llm,
+        splitter=QuestionSplitter(llm, dry_run_settings),
         loop_speaker=loop_speaker,
         history_store=store,
         session_id=meta.session_id,
@@ -390,9 +405,14 @@ def _run_autopilot_dry_run(*, frames: int, session: str) -> int:
 
     autopilot.start(0)
     waiter = threading.Event()
-    deadline = time.monotonic() + 5.0
-    while capture.frames_served < frame_limit and time.monotonic() < deadline:
-        waiter.wait(0.005)
+    target_rounds = max(1, frame_limit // 2)
+    deadline = time.monotonic() + 8.0
+    advanced = 0
+    while len(rounds) < target_rounds and time.monotonic() < deadline:
+        waiter.wait(0.01)
+        if advanced < len(rounds) < target_rounds:
+            capture.advance()
+            advanced = len(rounds)
     autopilot.stop()
     loop_speaker.stop()
 
@@ -438,6 +458,7 @@ def _run_gui(*, fake: bool) -> int:
         poll_interval=app_config.auto_poll_interval,
         stable_frames=app_config.auto_stable_frames,
         speak_choice_repeat=app_config.auto_speak_choice_repeat,
+        speak_multi_choice_repeat=app_config.auto_speak_multi_choice_repeat,
         speak_fill_repeat=app_config.auto_speak_fill_repeat,
         speak_short_repeat=app_config.auto_speak_short_repeat,
         speak_interval=app_config.auto_speak_interval,
@@ -450,8 +471,8 @@ def _run_gui(*, fake: bool) -> int:
     if fake:
 
         class GuiSmokePipeline:
-            def run_once(self, _hwnd: int) -> PipelineResult | None:
-                return None
+            def run_once(self, _hwnd: int) -> list[PipelineResult]:
+                return []
 
         class FakeAutoCapture:
             def grab_window(self, _hwnd: int) -> Any:
@@ -540,6 +561,7 @@ def _run_gui(*, fake: bool) -> int:
             capture=capture,
             ocr=ocr,
             llm=llm,
+            splitter=QuestionSplitter(llm, settings),
             loop_speaker=loop_speaker,
             history_store=history_store,
             session_id=session_id,
