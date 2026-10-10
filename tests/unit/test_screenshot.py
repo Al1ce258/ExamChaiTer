@@ -105,3 +105,49 @@ def test_hamming_with_integer_hashes_returns_distance(left: int, right: int, exp
 def test_hamming_with_negative_hash_raises_value_error() -> None:
     with pytest.raises(ValueError):
         screenshot_module.hamming(-1, 0)
+
+
+def _fake_win32_modules(mocker: MockerFixture, *, bits: bytes) -> None:
+    """Patch the win32 capture modules with a 2x1 pixel double."""
+    win32gui = mocker.MagicMock()
+    win32gui.GetWindowRect.return_value = (0, 0, 2, 1)
+    win32gui.GetWindowDC.return_value = 11
+    win32ui = mocker.MagicMock()
+    mfc_dc = win32ui.CreateDCFromHandle.return_value
+    save_dc = mfc_dc.CreateCompatibleDC.return_value
+    save_dc.GetSafeHdc.return_value = 22
+    bitmap = win32ui.CreateBitmap.return_value
+    bitmap.GetBitmapBits.return_value = bits
+    mocker.patch.object(screenshot_module, "_load_win32_capture", return_value=(win32gui, win32ui))
+
+
+def test_grab_window_uses_printwindow_first(mocker: MockerFixture) -> None:
+    _fake_win32_modules(mocker, bits=bytes([0, 0, 255, 0, 10, 20, 30, 0]))
+    print_window = mocker.patch.object(screenshot_module, "_print_window", return_value=True)
+    fallback = mocker.patch.object(screenshot_module, "grab_rect")
+
+    image = screenshot_module.grab_window(7)
+
+    assert print_window.call_count == 1 and fallback.call_count == 0
+    assert image.shape == (1, 2, 3)
+
+
+def test_grab_window_falls_back_to_mss_on_black(mocker: MockerFixture) -> None:
+    _fake_win32_modules(mocker, bits=bytes(8))
+    mocker.patch.object(screenshot_module, "_print_window", return_value=True)
+    mocker.patch.object(screenshot_module, "get_window_rect", return_value=(0, 0, 1, 1))
+    fallback = np.full((1, 1, 3), 7, dtype=np.uint8)
+    grab_rect = mocker.patch.object(screenshot_module, "grab_rect", return_value=fallback)
+
+    image = screenshot_module.grab_window(7)
+
+    assert grab_rect.call_count == 1 and image is fallback
+
+
+def test_grab_window_raises_on_both_fail(mocker: MockerFixture) -> None:
+    mocker.patch.object(screenshot_module, "_grab_window_printwindow", return_value=None)
+    mocker.patch.object(screenshot_module, "get_window_rect", return_value=(0, 0, 1, 1))
+    mocker.patch.object(screenshot_module, "grab_rect", side_effect=CaptureError("mss failed"))
+
+    with pytest.raises(CaptureError):
+        screenshot_module.grab_window(7)
