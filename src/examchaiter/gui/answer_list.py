@@ -47,8 +47,8 @@ class AnswerList(QListWidget):
         """Plain text of every row (placeholder included)."""
         texts: list[str] = []
         for index in range(self.count()):
-            item = self.item(index)
-            texts.append(item.text() if item is not None else "")
+            stored = self.item(index).data(Qt.ItemDataRole.UserRole)
+            texts.append(str(stored) if stored is not None else "")
         return texts
 
     def _add_row(
@@ -59,7 +59,12 @@ class AnswerList(QListWidget):
         disabled: bool = False,
         color: str = TEXT_PRIMARY,
     ) -> None:
-        item = QListWidgetItem(plain)
+        item = QListWidgetItem()
+        # Store the copy only as data: the row's text must NOT be set on the
+        # item, otherwise the delegate draws it underneath the item widget and
+        # the two renderings overlap into a ghost/double image.
+        item.setData(Qt.ItemDataRole.UserRole, plain)
+        item.setData(Qt.ItemDataRole.AccessibleTextRole, plain)
         if disabled:
             item.setFlags(Qt.ItemFlag.NoItemFlags)
         self.addItem(item)

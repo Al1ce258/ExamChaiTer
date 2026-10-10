@@ -95,3 +95,14 @@ def test_empty_then_results_no_ghost_items(qtbot: object) -> None:
     view.set_results([_result("3", "C")])
 
     assert (view.count(), view.row_texts()) == (1, ["[3] C"])
+
+
+def test_items_do_not_carry_duplicate_display_text(qtbot: object) -> None:
+    view = AnswerList()
+    qtbot.addWidget(view)  # type: ignore[attr-defined]
+
+    view.set_results([_result("1", "B")])
+
+    item = view.item(0)
+    assert item is not None and item.text() == ""
+    assert view.row_texts() == ["[1] B"]
