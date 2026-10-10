@@ -7,7 +7,7 @@ from re import Match
 
 from loguru import logger
 
-from examchaiter.config import Settings
+from examchaiter.config import DEFAULT_SPLIT_PATTERNS, Settings
 from examchaiter.llm.client import LLMClient, LLMFailed, LLMTimeout
 from examchaiter.llm.prompts import build_split_messages, parse_split_response
 from examchaiter.models import SplitQuestion
@@ -56,14 +56,34 @@ class QuestionSplitter:
             return [SplitQuestion(question_no="", text=fallback)]
 
     def _split_by_patterns(self, text: str) -> list[SplitQuestion] | None:
+        compiled: list[re.Pattern[str]] = []
         for pattern in self._settings.split_patterns or []:
             try:
-                regex = re.compile(pattern, re.MULTILINE)
+                compiled.append(re.compile(pattern, re.MULTILINE))
             except re.error:
                 logger.warning("无效的拆题正则，已跳过: {}", pattern)
-                continue
+
+        if not compiled:
+            return None
+
+        lines = text.splitlines()
+        start_index = next(
+            (
+                index
+                for index, line in enumerate(lines[:5])
+                if any(regex.search(line) for regex in compiled)
+            ),
+            None,
+        )
+        if start_index is None:
+            return None
+        if start_index > 0:
+            text = "\n".join(lines[start_index:])
+
+        allow_single = start_index > 0 or self._settings.split_patterns == DEFAULT_SPLIT_PATTERNS
+        for regex in compiled:
             matches = list(regex.finditer(text))
-            if len(matches) < 2:
+            if not matches or (len(matches) < 2 and not allow_single):
                 continue
             questions = self._segments(text, matches)
             short_count = sum(
@@ -94,4 +114,27 @@ class QuestionSplitter:
         except Exception:
             logger.exception("拆题 LLM 异常，降级单题")
             return []
-        return parse_split_response(raw)
+        return self._normalize_llm_questions(parse_split_response(raw))
+
+    @staticmethod
+    def _normalize_llm_questions(questions: list[SplitQuestion]) -> list[SplitQuestion]:
+        normalized: list[SplitQuestion] = []
+        for question in questions:
+            question_no = question.question_no.strip()
+            text = question.text
+            if not question_no:
+                for pattern in DEFAULT_SPLIT_PATTERNS:
+                    try:
+                        match = re.match(pattern, text, flags=re.MULTILINE)
+                    except re.error:
+                        continue
+                    if match is None or not match.groups():
+                        continue
+                    raw_no = match.group(1)
+                    if raw_no is None:
+                        continue
+                    question_no = str(raw_no).strip()
+                    text = text[match.end() :].lstrip()
+                    break
+            normalized.append(SplitQuestion(question_no=question_no, text=text))
+        return normalized

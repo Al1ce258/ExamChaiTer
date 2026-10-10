@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     dedup_threshold: int = Field(default=5, ge=0)
     min_text_len: int = Field(default=5, ge=0)
     split_patterns: list[str] = Field(default_factory=lambda: list(DEFAULT_SPLIT_PATTERNS))
+    ui_noise_filter: bool = True
+    ui_noise_patterns: list[str] = Field(default_factory=list)
     clipboard: bool = False
     ocr_use_gpu: bool = False
     tts_interval_s: float = Field(default=3.0, gt=0.0)

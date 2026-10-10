@@ -19,6 +19,7 @@ from examchaiter.llm.prompts import build_messages, parse_answer
 from examchaiter.llm.splitter import QuestionSplitter
 from examchaiter.models import Answer, PipelineResult, Question, QuestionType, SplitQuestion
 from examchaiter.ocr.engine import OcrEngine
+from examchaiter.ocr.filters import strip_ui_noise
 from examchaiter.ocr.layout import blocks_to_text
 from examchaiter.storage.hashing import question_hash
 from examchaiter.storage.history_store import HistoryEntry, HistoryStoreLike
@@ -97,7 +98,12 @@ class ExamPipeline:
 
             blocks = self.ocr.recognize(image)
             raw_text = blocks_to_text(blocks)
-            results = self._answer_text(raw_text, image, started_at)
+            text = (
+                strip_ui_noise(raw_text, self.settings.ui_noise_patterns or None)
+                if self.settings.ui_noise_filter
+                else raw_text
+            )
+            results = self._answer_text(text, image, started_at)
             if not results:
                 return []
 

@@ -162,3 +162,48 @@ def test_last_mode_fallback_when_both_fail() -> None:
     splitter.split("没有编号的一整段文本")
 
     assert splitter.last_mode == "fallback"
+
+
+def test_skips_leading_noise_before_numbered_question() -> None:
+    splitter = _splitter()
+
+    questions = splitter.split("language.ini\n文件 编辑\n1. 题目内容\nA. 选项")
+
+    assert len(questions) == 1 and questions[0].question_no == "1"
+
+
+def test_no_number_within_first_5_lines_falls_back_to_llm() -> None:
+    llm = FakeLLMClient(responses=['[{"no": "9", "text": "LLM题"}]'])
+    splitter = _splitter(llm)
+    text = "噪音一\n噪音二\n噪音三\n噪音四\n噪音五\n1. 题目内容"
+
+    questions = splitter.split(text)
+
+    assert [(q.question_no, q.text) for q in questions] == [("9", "LLM题")]
+
+
+def test_llm_result_with_empty_no_extracts_number_from_text() -> None:
+    llm = FakeLLMClient(responses=['[{"no": "", "text": "1. 题目内容"}]'])
+    splitter = _splitter(llm)
+
+    questions = splitter.split("没有编号的一整段文本")
+
+    assert [(q.question_no, q.text) for q in questions] == [("1", "题目内容")]
+
+
+def test_llm_result_keeps_explicit_no() -> None:
+    llm = FakeLLMClient(responses=['[{"no": "2", "text": "题目内容"}]'])
+    splitter = _splitter(llm)
+
+    questions = splitter.split("没有编号的一整段文本")
+
+    assert [(q.question_no, q.text) for q in questions] == [("2", "题目内容")]
+
+
+def test_question_text_has_no_prefix_after_extraction() -> None:
+    llm = FakeLLMClient(responses=['[{"no": "", "text": "1. 题目内容"}]'])
+    splitter = _splitter(llm)
+
+    questions = splitter.split("没有编号的一整段文本")
+
+    assert questions[0].text == "题目内容"

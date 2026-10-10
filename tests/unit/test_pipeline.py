@@ -67,6 +67,15 @@ class FakeHistory:
         self.entries[entry.question_hash] = entry
 
 
+class RecordingSplitter:
+    def __init__(self) -> None:
+        self.seen = ""
+
+    def split(self, raw_text: str) -> list[SplitQuestion]:
+        self.seen = raw_text
+        return [SplitQuestion(question_no="1", text=raw_text)]
+
+
 def test_run_once_happy_path_returns_choice(mocker: MockerFixture) -> None:
     results = _pipeline(mocker).run_once(1)
 
@@ -77,6 +86,22 @@ def test_run_once_returns_question_text(mocker: MockerFixture) -> None:
     results = _pipeline(mocker).run_once(1)
 
     assert results[0].question.text == _QUESTION_TEXT
+
+
+def test_run_once_filters_ui_noise_before_split(mocker: MockerFixture) -> None:
+    splitter = RecordingSplitter()
+    ocr = FakeOcrEngine(
+        blocks=[
+            OcrBlock(
+                text="language.ini\n文件 编辑 查看\n1. 题目内容",
+                bbox=(0.0, 0.0, 160.0, 20.0),
+            )
+        ]
+    )
+
+    _pipeline(mocker, ocr=ocr, splitter=splitter).run_once(1)
+
+    assert splitter.seen == "1. 题目内容"
 
 
 def test_run_once_dedup_hit_skips_llm(mocker: MockerFixture) -> None:

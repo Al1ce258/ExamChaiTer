@@ -354,6 +354,7 @@ def _run_debug_capture(
     from examchaiter.llm.prompts import SPLIT_SYSTEM_PROMPT, build_messages, parse_answer
     from examchaiter.llm.splitter import QuestionSplitter
     from examchaiter.ocr.engine import RapidOcrEngine
+    from examchaiter.ocr.filters import strip_ui_noise
     from examchaiter.ocr.layout import blocks_to_text
 
     class FixedDebugLLM(FakeLLMClient):
@@ -429,7 +430,12 @@ def _run_debug_capture(
         print(f"[{block.confidence:.2f}] {block.text!r} @ {block.bbox}")
     annotated.save(run_dir / "03_ocr_raw.png")
 
-    layout_text = blocks_to_text(blocks)
+    raw_layout_text = blocks_to_text(blocks)
+    layout_text = (
+        strip_ui_noise(raw_layout_text, settings.ui_noise_patterns or None)
+        if settings.ui_noise_filter
+        else raw_layout_text
+    )
     (run_dir / "04_layout_text.txt").write_text(layout_text, encoding="utf-8")
 
     if _llm is not None:

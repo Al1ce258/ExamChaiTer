@@ -33,6 +33,8 @@ _SETTINGS_FIELD_MAP: dict[str, str] = {
     "dedup_threshold": "dedup_threshold",
     "min_text_len": "min_text_len",
     "split_patterns": "split_patterns",
+    "ui_noise_filter": "ui_noise_filter",
+    "ui_noise_patterns": "ui_noise_patterns",
     "clipboard": "clipboard",
     "log_level": "log_level",
 }
@@ -54,6 +56,8 @@ class AppConfig:
     dedup_threshold: int = 5
     min_text_len: int = 20
     split_patterns: list[str] = field(default_factory=lambda: list(DEFAULT_SPLIT_PATTERNS))
+    ui_noise_filter: bool = True
+    ui_noise_patterns: list[str] = field(default_factory=list)
     ocr_upscale: float = 1.0
     choice_with_text: bool = False
     clipboard: bool = True
