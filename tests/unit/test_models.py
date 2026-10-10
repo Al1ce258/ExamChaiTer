@@ -79,6 +79,15 @@ def test_pipeline_result_with_reuse_stores_true() -> None:
     assert result.reused is True
 
 
+def test_pipeline_result_without_question_no_defaults_to_empty() -> None:
+    result = PipelineResult(
+        question=Question(text="Question"),
+        answer=Answer(qtype=QuestionType.CHOICE, content="B"),
+    )
+
+    assert result.question_no == ""
+
+
 def test_split_question_without_number_defaults_to_empty() -> None:
     question = SplitQuestion(text="题干")
 

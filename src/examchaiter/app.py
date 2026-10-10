@@ -21,6 +21,7 @@ from examchaiter.capture.window import (
 from examchaiter.config import Settings
 from examchaiter.errors import HotkeyError
 from examchaiter.llm.client import OpenAICompatClient
+from examchaiter.llm.splitter import QuestionSplitter
 from examchaiter.models import PipelineResult
 from examchaiter.ocr.engine import RapidOcrEngine
 from examchaiter.output.formatter import to_speech_text
@@ -40,7 +41,7 @@ class HotkeyListener(Protocol):
 
 
 class PipelineLike(Protocol):
-    def run_once(self, hwnd: int) -> PipelineResult | None: ...
+    def run_once(self, hwnd: int) -> list[PipelineResult]: ...
 
 
 class PresenterLike(Protocol):
@@ -134,12 +135,13 @@ class ExamChaiTerApp:
             if hwnd is None:
                 logger.warning("No foreground window available")
                 return
-            result = self.pipeline.run_once(hwnd)
-            if result is None:
+            results = self.pipeline.run_once(hwnd)
+            if not results:
                 logger.warning("Pipeline returned no result")
                 return
-            self._last_result = result
-            self.presenter.show(result)
+            self._last_result = results[-1]
+            for result in results:
+                self.presenter.show(result)
         except Exception:
             logger.exception("Answer hotkey failed")
 
@@ -207,4 +209,5 @@ def _build_pipeline(settings: Settings) -> ExamPipeline:
         ocr=RapidOcrEngine(),
         llm=llm,
         settings=settings,
+        splitter=QuestionSplitter(llm, settings),
     )

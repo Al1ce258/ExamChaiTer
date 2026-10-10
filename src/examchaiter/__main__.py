@@ -132,6 +132,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             is_window_alive,
         )
         from examchaiter.llm.client import FakeLLMClient, LLMClient, OpenAICompatClient
+        from examchaiter.llm.splitter import QuestionSplitter
         from examchaiter.models import OcrBlock
         from examchaiter.ocr.engine import FakeOcrEngine, OcrEngine, RapidOcrEngine
         from examchaiter.output import Presenter
@@ -179,23 +180,31 @@ def main(argv: Sequence[str] | None = None) -> int:
                     OcrBlock(text="示例题目 1+1=?", bbox=(0.0, 0.0, 180.0, 20.0), confidence=0.99)
                 ]
             )
-            llm = FakeLLMClient(responses=['{"type":"choice","answer":"B"}'])
+            llm = FakeLLMClient(
+                responses=[
+                    '[{"no": "", "text": "示例题目 1+1=?"}]',
+                    '{"type":"choice","answer":"B"}',
+                ]
+            )
 
         pipeline = ExamPipeline(
             capture=capture,
             ocr=ocr,
             llm=llm,
             settings=settings,
+            splitter=QuestionSplitter(llm, settings),
             _sleep=time.sleep if args.real else lambda _delay: None,
         )
-        result = pipeline.run_once(hwnd)
-        if result is None:
+        results = pipeline.run_once(hwnd)
+        if not results:
             print(f"ERROR: could not process window: {args.title}", file=sys.stderr)
             return 1
         reconfigure = getattr(sys.stdout, "reconfigure", None)
         if reconfigure is not None:
             reconfigure(encoding="utf-8")
-        Presenter(settings, _printer=print).show(result.answer)
+        presenter = Presenter(settings, _printer=print)
+        for result in results:
+            presenter.show(result.answer)
 
     if args.command == "speak":
         import time
@@ -235,6 +244,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "run":
         from examchaiter.app import ExamChaiTerApp, FakeHotkeyListener
+        from examchaiter.models import PipelineResult
         from examchaiter.output import Presenter
         from examchaiter.tts import FakeSpeaker, LoopSpeaker
 
@@ -242,8 +252,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.dry_run:
 
             class DryRunPipeline:
-                def run_once(self, _hwnd: int) -> None:
-                    return None
+                def run_once(self, _hwnd: int) -> list[PipelineResult]:
+                    return []
 
             app = ExamChaiTerApp(
                 settings=settings,
@@ -394,6 +404,7 @@ def _run_gui(*, fake: bool) -> int:
     from examchaiter.gui.state import GuiController
     from examchaiter.gui.tray import TrayController
     from examchaiter.llm import FakeLLMClient, OpenAICompatClient
+    from examchaiter.llm.splitter import QuestionSplitter
     from examchaiter.models import OcrBlock, PipelineResult
     from examchaiter.ocr import FakeOcrEngine, RapidOcrEngine
     from examchaiter.output import Presenter
@@ -441,7 +452,12 @@ def _run_gui(*, fake: bool) -> int:
                 )
             ]
         )
-        llm: Any = FakeLLMClient(responses=['{"type":"choice","answer":"B"}'])
+        llm: Any = FakeLLMClient(
+            responses=[
+                '[{"no": "", "text": "示例题目 1+1=? 请选择正确答案"}]',
+                '{"type":"choice","answer":"B"}',
+            ]
+        )
         loop_speaker = LoopSpeaker(FakeSpeaker())
 
         def make_smoke_pipeline() -> Any:
@@ -488,7 +504,13 @@ def _run_gui(*, fake: bool) -> int:
         presenter = Presenter(settings)
 
         def build_exam_pipeline() -> ExamPipeline:
-            return ExamPipeline(capture=capture, ocr=ocr, llm=llm, settings=settings)
+            return ExamPipeline(
+                capture=capture,
+                ocr=ocr,
+                llm=llm,
+                settings=settings,
+                splitter=QuestionSplitter(llm, settings),
+            )
 
         pipeline_factory = build_exam_pipeline
         list_windows_fn = None

@@ -19,11 +19,11 @@ class FakePipeline:
         self.error = error
         self.calls: list[int] = []
 
-    def run_once(self, hwnd: int) -> PipelineResult | None:
+    def run_once(self, hwnd: int) -> list[PipelineResult]:
         self.calls.append(hwnd)
         if self.error is not None:
             raise self.error
-        return self.result
+        return [self.result] if self.result is not None else []
 
 
 class FakePresenter:

@@ -15,11 +15,11 @@ class FakePipeline:
     error: Exception | None = None
     calls: list[int] = field(default_factory=list)
 
-    def run_once(self, hwnd: int) -> PipelineResult | None:
+    def run_once(self, hwnd: int) -> list[PipelineResult]:
         self.calls.append(hwnd)
         if self.error is not None:
             raise self.error
-        return self.result
+        return [self.result] if self.result is not None else []
 
 
 @dataclass

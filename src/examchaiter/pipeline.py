@@ -1,4 +1,4 @@
-"""Injected capture -> OCR -> LLM answer pipeline."""
+"""Injected capture -> OCR -> split -> LLM answer pipeline."""
 
 from __future__ import annotations
 
@@ -16,9 +16,12 @@ from examchaiter.capture.screenshot import dhash, hamming
 from examchaiter.config import Settings
 from examchaiter.llm.client import LLMClient, LLMFailed, LLMTimeout
 from examchaiter.llm.prompts import build_messages, parse_answer
-from examchaiter.models import Answer, PipelineResult, Question, QuestionType
+from examchaiter.llm.splitter import QuestionSplitter
+from examchaiter.models import Answer, PipelineResult, Question, QuestionType, SplitQuestion
 from examchaiter.ocr.engine import OcrEngine
 from examchaiter.ocr.layout import blocks_to_text
+from examchaiter.storage.hashing import question_hash
+from examchaiter.storage.history_store import HistoryEntry, HistoryStore
 
 ImageArray = NDArray[np.uint8]
 WindowRect = tuple[int, int, int, int]
@@ -37,7 +40,7 @@ class Capture(Protocol):
 
 
 class ExamPipeline:
-    """Run one injected capture/OCR/LLM answer cycle."""
+    """Run one injected capture/OCR/split/LLM answer cycle."""
 
     def __init__(
         self,
@@ -45,6 +48,9 @@ class ExamPipeline:
         ocr: OcrEngine,
         llm: LLMClient,
         settings: Settings,
+        splitter: QuestionSplitter,
+        history_store: HistoryStore | None = None,
+        session_id: str = "",
         _clock: Callable[[], float] | None = None,
         _sleep: Callable[[float], None] = time.sleep,
     ) -> None:
@@ -52,28 +58,31 @@ class ExamPipeline:
         self.ocr = ocr
         self.llm = llm
         self.settings = settings
+        self.splitter = splitter
+        self.history_store = history_store
+        self.session_id = session_id
         self._clock = _clock or time.monotonic
         self._sleep = _sleep
         self._last_hash: int | None = None
-        self._last_result: PipelineResult | None = None
+        self._last_results: list[PipelineResult] = []
 
-    def run_once(self, hwnd: int) -> PipelineResult | None:
-        """Run the pipeline once and absorb expected integration failures."""
+    def run_once(self, hwnd: int) -> list[PipelineResult]:
+        """Run the pipeline once and return one result per split question."""
 
         started_at = self._clock()
         try:
             try:
                 if not self.capture.is_window_alive(hwnd):
                     logger.warning("Target window is not alive: hwnd={}", hwnd)
-                    return None
+                    return []
                 self.capture.get_window_rect(hwnd)
             except Exception:
                 logger.warning("Target window is unavailable: hwnd={}", hwnd)
-                return None
+                return []
 
             if not self.capture.focus_window(hwnd):
                 logger.warning("Could not focus target window: hwnd={}", hwnd)
-                return None
+                return []
 
             self._sleep(self.settings.settle_ms / 1000.0)
             image = self.capture.grab_window(hwnd)
@@ -81,50 +90,122 @@ class ExamPipeline:
 
             if (
                 self._last_hash is not None
-                and self._last_result is not None
+                and self._last_results
                 and hamming(image_hash, self._last_hash) <= self.settings.dedup_threshold
             ):
-                return PipelineResult(
-                    question=self._last_result.question,
-                    answer=self._last_result.answer,
-                    reused=True,
-                )
+                return [result.model_copy(update={"reused": True}) for result in self._last_results]
 
             blocks = self.ocr.recognize(image)
-            question_text = blocks_to_text(blocks)
-
-            if len(question_text) >= self.settings.min_text_len:
-                question = Question(text=question_text)
-                messages = build_messages(question_text)
-            elif self.settings.llm_vision_model:
-                image_bytes = _png_bytes(image)
-                question = Question(text=question_text, images=(image_bytes,))
-                messages = build_messages(question_text, images=[image_bytes])
-            else:
-                question = Question(text=question_text)
-                return PipelineResult(
-                    question=question,
-                    answer=Answer(qtype=QuestionType.UNKNOWN, content="未识别到文字"),
-                    reused=False,
-                )
-
-            try:
-                raw = self.llm.complete(messages, json_mode=True)
-            except (LLMFailed, LLMTimeout):
-                logger.exception("LLM request failed")
-                answer = Answer(qtype=QuestionType.UNKNOWN, content="⚠️ 请求失败")
-            else:
-                answer = parse_answer(raw)
+            raw_text = blocks_to_text(blocks)
+            results = self._answer_text(raw_text, image, started_at)
+            if not results:
+                return []
 
             self._last_hash = image_hash
-            result = PipelineResult(question=question, answer=answer, reused=False)
-            self._last_result = result
-            latency_ms = (self._clock() - started_at) * 1000.0
-            logger.trace("Pipeline completed in {:.1f} ms", latency_ms)
-            return result
+            self._last_results = results
+            logger.trace("Pipeline completed in {:.1f} ms", (self._clock() - started_at) * 1000.0)
+            return results
         except Exception:
             logger.exception("Pipeline failed for hwnd={}", hwnd)
+            return []
+
+    def _answer_text(
+        self, raw_text: str, image: ImageArray, started_at: float
+    ) -> list[PipelineResult]:
+        if len(raw_text) >= self.settings.min_text_len:
+            questions = self.splitter.split(raw_text)
+            return [self._answer_question(question, started_at) for question in questions]
+
+        if self.settings.llm_vision_model:
+            image_bytes = _png_bytes(image)
+            question = SplitQuestion(question_no="", text=raw_text)
+            return [self._answer_question(question, started_at, images=[image_bytes])]
+
+        return [
+            PipelineResult(
+                question=Question(text=raw_text),
+                answer=Answer(qtype=QuestionType.UNKNOWN, content="未识别到文字"),
+                reused=False,
+            )
+        ]
+
+    def _answer_question(
+        self,
+        split_question: SplitQuestion,
+        started_at: float,
+        images: list[bytes] | None = None,
+    ) -> PipelineResult:
+        text = split_question.text
+        qhash = question_hash(f"{split_question.question_no}|{text}")
+
+        entry = self._find_cached(qhash)
+        if entry is not None:
+            return PipelineResult(
+                question=Question(text=text),
+                answer=Answer(qtype=_safe_qtype(entry.answer_qtype), content=entry.answer_content),
+                reused=True,
+                question_no=split_question.question_no,
+            )
+
+        question = Question(text=text, images=tuple(images or ()))
+        messages = build_messages(text, images=images)
+        try:
+            raw = self.llm.complete(messages, json_mode=True)
+        except (LLMFailed, LLMTimeout):
+            logger.exception("LLM request failed")
+            answer = Answer(qtype=QuestionType.UNKNOWN, content="⚠️ 请求失败")
+        else:
+            answer = parse_answer(raw)
+
+        self._store_answer(split_question, qhash, answer, started_at)
+        return PipelineResult(
+            question=question,
+            answer=answer,
+            reused=False,
+            question_no=split_question.question_no,
+        )
+
+    def _find_cached(self, qhash: str) -> HistoryEntry | None:
+        if self.history_store is None or not self.session_id:
             return None
+        try:
+            return self.history_store.find_by_hash(self.session_id, qhash)
+        except Exception:
+            logger.warning("历史缓存查询失败，忽略缓存")
+            return None
+
+    def _store_answer(
+        self,
+        split_question: SplitQuestion,
+        qhash: str,
+        answer: Answer,
+        started_at: float,
+    ) -> None:
+        if self.history_store is None or not self.session_id:
+            return
+        try:
+            self.history_store.add_entry(
+                self.session_id,
+                HistoryEntry(
+                    question_hash=qhash,
+                    question_text=split_question.text,
+                    answer_qtype=answer.qtype.value,
+                    answer_content=answer.content,
+                    model=str(getattr(self.llm, "model", "")),
+                    latency_ms=int((self._clock() - started_at) * 1000),
+                    created_at=time.time(),
+                ),
+                flush_now=True,
+            )
+        except Exception:
+            logger.exception("历史写入失败")
+
+
+def _safe_qtype(value: str) -> QuestionType:
+    try:
+        return QuestionType(value)
+    except ValueError:
+        return QuestionType.UNKNOWN
 
 
 def _png_bytes(image: ImageArray) -> bytes:

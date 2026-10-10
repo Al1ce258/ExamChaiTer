@@ -91,9 +91,10 @@ class GuiController:
 
         self.state.busy = True
         try:
-            result = self.pipeline.run_once(self.state.current_hwnd)
-            if result is None:
+            results = self.pipeline.run_once(self.state.current_hwnd)
+            if not results:
                 return None
+            result = results[0]
             self.presenter.show(result)
             self.state.last_answer = result.answer
             self.state.last_question_text = result.question.text

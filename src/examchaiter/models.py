@@ -56,6 +56,7 @@ class PipelineResult(_FrozenModel):
     question: Question
     answer: Answer
     reused: bool = False
+    question_no: str = ""
 
 
 class SplitQuestion(_FrozenModel):
