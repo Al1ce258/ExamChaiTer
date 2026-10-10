@@ -39,3 +39,7 @@ class HotkeyError(ExamChaiTerError):
 
 class PipelineError(ExamChaiTerError):
     """Raised when the answer pipeline cannot complete."""
+
+
+class StorageError(ExamChaiTerError):
+    """Raised when configuration or history storage cannot be read or written."""
