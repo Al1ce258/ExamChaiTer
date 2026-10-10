@@ -42,13 +42,13 @@ class LoopSpeaker:
         self._thread: threading.Thread | None = None
         self._lock = threading.RLock()
 
-    def start(self, text: str) -> None:
+    def start(self, text: str, max_repeats: int | None = None) -> None:
         with self._lock:
             self._stop_locked()
             self._event = threading.Event()
             self._thread = threading.Thread(
                 target=self._run,
-                args=(text, self._event),
+                args=(text, self._event, max_repeats),
                 daemon=True,
             )
             self._thread.start()
@@ -67,9 +67,15 @@ class LoopSpeaker:
             self._thread.join(timeout=1.0)
         self._thread = None
 
-    def _run(self, text: str, event: threading.Event) -> None:
+    def _run(self, text: str, event: threading.Event, max_repeats: int | None) -> None:
+        if max_repeats is not None and max_repeats <= 0:
+            return
+        repeats = 0
         while not event.is_set():
             self.speaker.speak(text)
+            repeats += 1
+            if max_repeats is not None and repeats >= max_repeats:
+                return
             event.wait(self.interval_s)
 
 

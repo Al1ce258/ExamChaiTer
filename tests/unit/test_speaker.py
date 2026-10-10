@@ -189,3 +189,27 @@ def test_loop_speaker_stop_then_start_again_stops_cleanly() -> None:
     loop.stop()
 
     assert loop.is_running() is False
+
+
+def test_loop_speaker_max_repeats_stops_after_n() -> None:
+    speaker = FakeSpeaker()
+    loop = LoopSpeaker(speaker, interval_s=0.01)
+
+    loop.start("repeat", max_repeats=3)
+    deadline = time.monotonic() + 0.5
+    while loop.is_running() and time.monotonic() < deadline:
+        time.sleep(0.005)
+
+    assert len(speaker.spoken) == 3 and loop.is_running() is False
+
+
+def test_loop_speaker_max_repeats_none_is_infinite() -> None:
+    speaker = FakeSpeaker()
+    loop = LoopSpeaker(speaker, interval_s=0.01)
+
+    loop.start("repeat")
+    time.sleep(0.05)
+    running = loop.is_running()
+    loop.stop()
+
+    assert running is True and len(speaker.spoken) >= 2
