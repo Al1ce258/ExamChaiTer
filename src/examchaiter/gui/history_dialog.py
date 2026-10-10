@@ -36,7 +36,7 @@ class HistoryDialog(QDialog):
     def __init__(self, controller: GuiController, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.controller = controller
-        self.setWindowTitle("历史记录")
+        self.setWindowTitle("🕘 历史记录")
         self.resize(880, 560)
 
         self.search_edit = QLineEdit()
@@ -55,6 +55,7 @@ class HistoryDialog(QDialog):
         self.entry_table.setHorizontalHeaderLabels(["时间", "题型", "答案", "题目摘要"])
         self.entry_table.horizontalHeader().setStretchLastSection(True)
         self.entry_table.verticalHeader().setVisible(False)
+        self.entry_table.verticalHeader().setDefaultSectionSize(28)
         self.entry_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.entry_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.detail_edit = QPlainTextEdit()

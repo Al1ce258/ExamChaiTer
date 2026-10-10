@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
     QFormLayout,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
@@ -33,7 +35,7 @@ class ConfigDialog(QDialog):
     def __init__(self, controller: GuiController, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.controller = controller
-        self.setWindowTitle("配置")
+        self.setWindowTitle("⚙ 配置")
         self.setMinimumWidth(460)
 
         self.base_url_edit = QLineEdit()
@@ -61,19 +63,24 @@ class ConfigDialog(QDialog):
         self.fill_short_spin.setRange(1, 20)
 
         form = QFormLayout()
-        form.addRow("LLM Base URL", self.base_url_edit)
-        form.addRow("API Key", api_key_box)
-        form.addRow("模型名", self.model_edit)
-        form.addRow("Vision 模型", self.vision_edit)
-        form.addRow("TTS 语速", self.tts_rate_spin)
-        form.addRow("自动模式轮询间隔", self.poll_spin)
-        form.addRow("选择题朗读次数", self.choice_spin)
-        form.addRow("填空/简答朗读次数", self.fill_short_spin)
+        form.setHorizontalSpacing(12)
+        form.setVerticalSpacing(12)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        form.addRow(self._field_label("LLM Base URL"), self.base_url_edit)
+        form.addRow(self._field_label("API Key"), api_key_box)
+        form.addRow(self._field_label("模型名"), self.model_edit)
+        form.addRow(self._field_label("Vision 模型"), self.vision_edit)
+        form.addRow(self._field_label("TTS 语速"), self.tts_rate_spin)
+        form.addRow(self._field_label("自动模式轮询间隔"), self.poll_spin)
+        form.addRow(self._field_label("选择题朗读次数"), self.choice_spin)
+        form.addRow(self._field_label("填空/简答朗读次数"), self.fill_short_spin)
 
+        self.cancel_button = QPushButton("取消")
+        self.save_button = QPushButton("保存")
+        self.save_button.setProperty("class", "primary")
         buttons = QDialogButtonBox()
-        self.cancel_button = buttons.addButton("取消", QDialogButtonBox.ButtonRole.RejectRole)
-        self.save_button = buttons.addButton("保存", QDialogButtonBox.ButtonRole.AcceptRole)
-        self.save_button.setObjectName("primaryButton")
+        buttons.addButton(self.cancel_button, QDialogButtonBox.ButtonRole.RejectRole)
+        buttons.addButton(self.save_button, QDialogButtonBox.ButtonRole.AcceptRole)
 
         layout = QVBoxLayout(self)
         layout.addLayout(form)
@@ -84,6 +91,14 @@ class ConfigDialog(QDialog):
         self.save_button.clicked.connect(self.save)
 
         self.load()
+
+    @staticmethod
+    def _field_label(text: str) -> QLabel:
+        label = QLabel(text)
+        label.setObjectName("FieldLabel")
+        label.setFixedWidth(140)
+        label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        return label
 
     def load(self) -> None:
         config = self.controller.get_config()

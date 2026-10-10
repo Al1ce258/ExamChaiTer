@@ -73,6 +73,10 @@ QLabel#CardTitle {
     padding-bottom: 8px;
 }
 QLabel#SearchIcon {
+QLabel#FieldLabel {
+    color: %(text_secondary)s;
+    padding-right: 4px;
+}
     font-size: 14pt;
     padding: 0 4px;
 }
