@@ -311,6 +311,7 @@ Tests: pytest tests/unit/test_xxx.py -q  (N passed)
 - onefile 首次启动 5~10 秒解压，属正常，README 需注明
 - rapidocr 模型文件用 PyInstaller.utils.hooks.collect_data_files("rapidocr_onnxruntime") 收集，不要手写路径
 - 所有延迟 import 的第三方包（openai / pyttsx3 等）必须在 spec 的 hiddenimports 用 collect_submodules 显式收集，否则 exe 启动时 ModuleNotFoundError
+- 已知问题：PySide6 在 onefile 模式下可能报 "DLL load failed while importing QtWidgets: 找不到指定的程序"，与 VC++ 运行库版本、onefile 解压冲突有关；MVP 阶段不修，用户改用命令启动 `uv run python -m examchaiter gui`
 
 ---
 

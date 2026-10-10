@@ -1,6 +1,6 @@
 # ExamChaiTer
 
-**状态：Phase 9.1 完成，exe 已可用。**
+**状态：MVP 完成，推荐命令启动（exe 打包为实验性，见下方说明）**
 
 ExamChaiTer 是一个 Windows 本地工具：聚焦指定窗口 -> 截图 -> OCR -> 调用
 OpenAI 兼容接口 -> 仅输出答案 -> 可选循环语音朗读。
@@ -15,29 +15,27 @@ OpenAI 兼容接口 -> 仅输出答案 -> 可选循环语音朗读。
 - [uv](https://docs.astral.sh/uv/)
 - 可选：OpenAI 兼容服务的 API Key
 
-## 三步跑通
+## 快速开始
 
-```powershell
-# 1. 安装锁定依赖
-uv sync
-
-# 2. 创建本地配置，并填写 EXAMCHAITER_LLM_API_KEY
-Copy-Item .env.example .env
-
-# 3. 启动常驻热键应用
-uv run python -m examchaiter run
-```
+1. 克隆仓库：`git clone <仓库地址> && cd ExamChaiTer`
+2. 安装锁定依赖：`uv sync`
+3. 创建本地配置，并填写 `EXAMCHAITER_LLM_API_KEY`：`copy .env.example .env`
+4. 启动推荐 GUI：`uv run python -m examchaiter gui`
 
 `.env`、`debug/`、`logs/`、真实考试截图、模型权重和 API Key 都不得提交。
 
-## 打包为 exe
+## 推荐启动方式
 
-1. 安装依赖后执行 `powershell -ExecutionPolicy Bypass -File scripts/build.ps1`。
-2. 产物位于 `dist/ExamChaiTer.exe`。
-3. onefile 首次启动需解压 5~10 秒，之后正常。
-4. 建议右键“以管理员身份运行”，否则 `Ctrl+Alt+Q/S/X` 可能无法注册。
-5. 杀软可能误报；加入白名单即可，未签名无法根治。
-6. 双击启动后默认打开 GUI 主窗口。
+```powershell
+# 方式一（推荐）：GUI
+uv run python -m examchaiter gui
+
+# 方式二（常驻热键）
+uv run python -m examchaiter run
+
+# 方式三（CLI 单次作答）
+uv run python -m examchaiter answer --title "窗口标题" --real
+```
 
 ## 热键
 
@@ -130,11 +128,6 @@ uv run pytest -q -m e2e
 `tests/unit` 不访问网络、真实窗口、真实音频设备或真实 LLM。`integration` 与
 `e2e` 默认不随普通提交运行，单独运行时不套用 90% 总覆盖率门槛。
 
-## 打包
-
-项目使用 `ExamChaiTer.spec` 构建无控制台窗口的单文件 `ExamChaiTer.exe`。
-构建完成后可用 `scripts/verify_exe.py` 做本机存活冒烟；该脚本不进入 CI。
-
 ## 测试素材
 
 `tests/fixtures/synthetic_question.png` 是合成图，非真实截图，只包含人工生成的
@@ -150,3 +143,19 @@ uv run python tests/fixtures/gen_sample.py
 - pynput 在部分 Windows 环境中需要管理员权限。
 - 真实 OCR 模型、真实 LLM、真实 TTS 和真实窗口交互由本地手动联调。
 - e2e 默认跳过，仓库不会在测试中发起真实 API 请求。
+- exe 打包为实验性，未作为 MVP 验收路径
+
+## 打包为 exe（实验性，可能失败）
+
+本阶段 PySide6 onefile 打包在部分环境报 "DLL load failed while importing QtWidgets"。
+若你不需要单文件分发，直接用上面的命令启动即可。若坚持打包，建议改用 onedir 模式（spec 里去掉 onefile）。
+
+1. 安装依赖后执行 `powershell -ExecutionPolicy Bypass -File scripts/build.ps1`。
+2. 产物位于 `dist/ExamChaiTer.exe`。
+3. onefile 首次启动需解压 5~10 秒，之后正常。
+4. 建议右键“以管理员身份运行”，否则 `Ctrl+Alt+Q/S/X` 可能无法注册。
+5. 杀软可能误报；加入白名单即可，未签名无法根治。
+6. 双击启动后默认打开 GUI 主窗口。
+
+项目使用 `ExamChaiTer.spec` 构建无控制台窗口的单文件 `ExamChaiTer.exe`。
+构建完成后可用 `scripts/verify_exe.py` 做本机存活冒烟；该脚本不进入 CI。
