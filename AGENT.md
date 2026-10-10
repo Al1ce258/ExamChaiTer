@@ -116,6 +116,8 @@ class ExamPipeline:
 
 除上述列表外禁止新增依赖。Phase 8 之前不得 import PySide6；Phase 9 之前不得 import PyInstaller。
 
+Phase 10 不新增依赖：配置与历史存储用 JSON + pathlib 即可（无需 sqlite）；API Key 加密走已授权的 pywin32（win32crypt/DPAPI）。
+
 ---
 
 ## 5. 项目结构与文件职责速查
@@ -145,7 +147,12 @@ src/examchaiter/
 │   ├─ overlay.py
 │   └─ state.py
 ├─ pipeline.py      ExamPipeline.run_once() -> PipelineResult | None
-└─ app.py           ExamChaiTerApp（pynput 热键 + 主循环）
+├─ app.py           ExamChaiTerApp（pynput 热键 + 主循环）
+└─ storage/
+    ├─ __init__.py
+    ├─ config_store.py     # ConfigStore + AppConfig
+    ├─ history_store.py    # HistoryStore + HistoryEntry + SessionMeta
+    └─ hashing.py          # normalize_text + question_hash
 ExamChaiTer.spec（仓库根）
 ```
 
@@ -197,6 +204,94 @@ class GuiController:
 
 **GUI 铁律**：GUI 文件内禁止直接 new OpenAICompatClient / RapidOcrEngine / win32gui 等具体实现，全部从 MainWindow.__init__ 注入。
 
+```python
+# ---- storage/hashing.py（纯函数）----
+def normalize_text(text: str) -> str
+    # 去除所有空白字符；全角转半角；英文小写化；中文标点统一为英文标点
+def question_hash(text: str) -> str
+    # sha256(normalize_text(text)) 的十六进制字符串
+
+# ---- storage/config_store.py ----
+@dataclass
+class AppConfig:
+    llm_base_url: str = "https://api.deepseek.com/v1"
+    llm_api_key: str = ""
+    llm_model: str = "deepseek-chat"
+    llm_vision_model: str = ""
+    llm_timeout: float = 30.0
+    tts_enabled: bool = False
+    tts_rate: int = 180
+    tts_loop_interval: float = 3.0
+    settle_ms: int = 150
+    dedup_threshold: int = 5
+    min_text_len: int = 20
+    choice_with_text: bool = False
+    clipboard: bool = True
+    hotkey_answer: str = "<ctrl>+<alt>+q"
+    hotkey_tts: str = "<ctrl>+<alt>+s"
+    hotkey_quit: str = "<ctrl>+<alt>+x"
+    log_level: str = "INFO"
+    # Phase 11 AutoPilot（预留字段，本 Phase 只存不读）
+    auto_enabled: bool = False
+    auto_poll_interval: float = 1.5
+    auto_stable_frames: int = 2
+    auto_speak_choice_repeat: int = 5
+    auto_speak_fill_repeat: int = 3
+    auto_speak_short_repeat: int = 1
+    auto_speak_interval: float = 3.0
+
+class ConfigStore:
+    def __init__(self, base_dir: Path | None = None) -> None
+        # base_dir=None 时用 %APPDATA%/ExamChaiTer
+    @staticmethod
+    def default_base_dir() -> Path
+    def load(self) -> AppConfig
+        # 优先级：base_dir/config.json > 项目根 .env > AppConfig 默认值
+        # config.json 不存在时返回基于 .env 的 AppConfig
+    def save(self, cfg: AppConfig) -> None
+        # 原子写：先写 config.json.tmp 再 os.replace
+        # api_key 用 win32crypt.CryptProtectData 加密后 base64 存入字段 "api_key_enc"
+        # 若 win32crypt 不可用 → 明文存入 "api_key" 并在日志里 warning（仅一次）
+    def to_settings(self) -> Settings
+        # 返回 examchaiter.config.Settings 实例，用 AppConfig 字段覆盖默认值
+
+# ---- storage/history_store.py ----
+@dataclass
+class HistoryEntry:
+    question_hash: str
+    question_text: str
+    answer_qtype: str
+    answer_content: str
+    model: str = ""
+    latency_ms: int = 0
+    created_at: float = 0.0
+
+@dataclass
+class SessionMeta:
+    session_id: str      # 文件名（不含 .json）
+    name: str            # 显示名（用户可改）
+    created_at: float
+    question_count: int
+
+class HistoryStore:
+    def __init__(self, base_dir: Path | None = None) -> None
+    def list_sessions(self) -> list[SessionMeta]
+    def create_session(self, name: str) -> SessionMeta
+        # name 为空时用当前时间 "YYYY-MM-DD-HHMM"
+        # 冲突时追加 "-2" "-3"
+    def load_session(self, session_id: str) -> dict[str, HistoryEntry]
+        # 返回 {question_hash: entry}
+    def find_by_hash(self, session_id: str, qhash: str) -> HistoryEntry | None
+    def add_entry(self, session_id: str, entry: HistoryEntry) -> None
+        # 已存在同 hash → 更新（覆盖），不新增
+    def rename_session(self, session_id: str, new_name: str) -> bool
+    def delete_session(self, session_id: str) -> bool
+    def search(self, keyword: str, limit: int = 50) -> list[tuple[str, HistoryEntry]]
+        # 跨 session 搜索 question_text 包含 keyword 的条目
+        # 返回 [(session_id, entry), ...]
+    # 禁止存截图；HistoryEntry 不含任何图像字段
+```
+
 ---
 
 ## 7. 测试规范
@@ -244,6 +339,9 @@ settings          # 隔离的 Settings，全部默认值 + 可覆盖
 | 7     | 打磨       | README, e2e_smoke.py                                         | 三步跑通文档                                                 |
 | 8     | GUI | gui/*.py | 双击 main_window 能开窗；三按钮绑定 ExamPipeline / LoopSpeaker；托盘菜单可用；GUI 层零业务逻辑 |
 | 9     | 打包 exe | ExamChaiTer.spec + scripts/build.ps1 | 产物 dist/ExamChaiTer.exe 存在；双击打开主窗口；无控制台黑框；托盘图标与菜单可用；Ctrl+Alt+Q/S/X 生效（管理员权限下）；缺 API Key 时弹窗提示 |
+| 10    | 配置持久化 + 历史存储 | storage/*.py | ConfigStore + HistoryStore 可读写、可单测；API Key 加密存盘 |
+| 11    | AutoPilot 引擎 | autopilot.py + tts/speaker.py 扩展 | 状态机 + 按题型朗读 N 遍 + 精确缓存命中 |
+| 12    | GUI 大改版 | gui/*.py | Windows 风格 + 配置面板 + 历史面板 + 自动模式开关 |
 
 每个 Phase 结束打 tag：`v0.1.0-phase<N>`。
 
@@ -312,6 +410,13 @@ Tests: pytest tests/unit/test_xxx.py -q  (N passed)
 - rapidocr 模型文件用 PyInstaller.utils.hooks.collect_data_files("rapidocr_onnxruntime") 收集，不要手写路径
 - 所有延迟 import 的第三方包（openai / pyttsx3 等）必须在 spec 的 hiddenimports 用 collect_submodules 显式收集，否则 exe 启动时 ModuleNotFoundError
 - 已知问题：PySide6 在 onefile 模式下可能报 "DLL load failed while importing QtWidgets: 找不到指定的程序"，与 VC++ 运行库版本、onefile 解压冲突有关；MVP 阶段不修，用户改用命令启动 `uv run python -m examchaiter gui`
+
+### Phase 10 存储坑清单
+
+- 历史记录禁止存截图：单张 200KB × 500 题 = 100MB，会毁掉 JSON 文件
+- 配置写盘必须原子写（tmp + os.replace），否则崩溃时损坏文件
+- win32crypt 延迟 import；不可用时降级明文并只在首次 log.warning
+- Qt 主线程不能跑 pipeline，Phase 11 必须用 QThread + signal
 
 ---
 
