@@ -187,6 +187,7 @@ class AutoPilot:
         self._emit(self._callbacks.on_round_done, results)
         if self._speak_round(results, hwnd, image_hash):
             self._has_answered = True
+            self._emit(self._callbacks.on_status, f"本轮朗读完成（{len(results)} 题）")
 
     def _answer_questions(self, questions: list[SplitQuestion]) -> list[PipelineResult]:
         results: list[PipelineResult] = []

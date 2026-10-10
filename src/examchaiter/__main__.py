@@ -328,6 +328,7 @@ def _run_autopilot_dry_run(*, frames: int, session: str) -> int:
     )
     from examchaiter.config import Settings
     from examchaiter.llm import FakeLLMClient
+    from examchaiter.llm.prompts import SPLIT_SYSTEM_PROMPT
     from examchaiter.llm.splitter import QuestionSplitter
     from examchaiter.models import OcrBlock
     from examchaiter.ocr import FakeOcrEngine
@@ -362,17 +363,42 @@ def _run_autopilot_dry_run(*, frames: int, session: str) -> int:
     ocr = FakeOcrEngine(
         blocks=[
             OcrBlock(
-                text="示例题目：1+1=? 请从下列选项中选择正确答案。",
+                text=(
+                    "示例题一：1+1=? 请选择正确答案\n"
+                    "示例题二：2+2=? 请选择正确答案\n"
+                    "示例题三：3+3=? 请选择正确答案"
+                ),
                 bbox=(0.0, 0.0, 200.0, 20.0),
                 confidence=0.99,
             )
         ]
     )
-    llm = FakeLLMClient(
-        responses=[
-            '[{"no": "", "text": "示例题目：1+1=? 请从下列选项中选择正确答案。"}]',
+
+    class DryRunLLM(FakeLLMClient):
+        """Serve the split payload for split prompts and queued answers otherwise."""
+
+        def __init__(self, split_payload: str, answers: list[str]) -> None:
+            super().__init__(responses=list(answers))
+            self._split_payload = split_payload
+            self._answers = list(answers)
+
+        def complete(self, messages: list[dict[str, object]], *, json_mode: bool = False) -> str:
+            self.calls.append(messages)
+            if any(message.get("content") == SPLIT_SYSTEM_PROMPT for message in messages):
+                return self._split_payload
+            if not self.responses:
+                self.responses = list(self._answers)
+            return self.responses.pop(0)
+
+    llm = DryRunLLM(
+        '[{"no": "1", "text": "示例题一：1+1=? 请选择正确答案"},'
+        ' {"no": "2", "text": "示例题二：2+2=? 请选择正确答案"},'
+        ' {"no": "3", "text": "示例题三：3+3=? 请选择正确答案"}]',
+        [
             '{"type":"choice","answer":"B"}',
-        ]
+            '{"type":"multi_choice","answer":"ABD"}',
+            '{"type":"fill","answer":"9"}',
+        ],
     )
     speaker = FakeSpeaker()
     loop_speaker = LoopSpeaker(speaker, interval_s=0.01)
@@ -384,10 +410,18 @@ def _run_autopilot_dry_run(*, frames: int, session: str) -> int:
     statuses: list[str] = []
     errors: list[str] = []
     rounds: list[list[Any]] = []
+    completed_rounds: list[int] = []
+    config = AutoPilotConfig(poll_interval=0.02)
+
+    def _on_status(message: str) -> None:
+        statuses.append(message)
+        if message.startswith("本轮朗读完成"):
+            completed_rounds.append(len(completed_rounds) + 1)
+
     callbacks = AutoPilotCallbacks(
         on_state=lambda state: states.append(state.value),
         on_answer=lambda _result, from_cache: answers.append(from_cache),
-        on_status=statuses.append,
+        on_status=_on_status,
         on_error=lambda exc: errors.append(repr(exc)),
         on_round_done=rounds.append,
     )
@@ -399,27 +433,49 @@ def _run_autopilot_dry_run(*, frames: int, session: str) -> int:
         loop_speaker=loop_speaker,
         history_store=store,
         session_id=meta.session_id,
-        config=AutoPilotConfig(poll_interval=0.02),
+        config=config,
         callbacks=callbacks,
     )
 
-    autopilot.start(0)
-    waiter = threading.Event()
     target_rounds = max(1, frame_limit // 2)
-    deadline = time.monotonic() + 8.0
+    autopilot.start(0)
+    started_at = time.monotonic()
+    waiter = threading.Event()
+    deadline = time.monotonic() + 15.0
     advanced = 0
-    while len(rounds) < target_rounds and time.monotonic() < deadline:
+    while len(completed_rounds) < target_rounds and time.monotonic() < deadline:
         waiter.wait(0.01)
-        if advanced < len(rounds) < target_rounds:
+        if advanced < len(completed_rounds) < target_rounds:
             capture.advance()
-            advanced = len(rounds)
+            advanced = len(completed_rounds)
     autopilot.stop()
     loop_speaker.stop()
 
-    cached = sum(1 for from_cache in answers if from_cache)
+    repeat_map = {
+        "choice": config.speak_choice_repeat,
+        "multi_choice": config.speak_multi_choice_repeat,
+        "fill": config.speak_fill_repeat,
+        "short": config.speak_short_repeat,
+    }
     print(f"state transitions: {' -> '.join(states)}")
+    for index, results in enumerate(rounds, start=1):
+        numbers = [
+            result.question_no or str(position + 1) for position, result in enumerate(results)
+        ]
+        repeats = [repeat_map.get(result.answer.qtype.value, 1) for result in results]
+        cached_in_round = sum(1 for result in results if result.reused)
+        print(
+            f"frame {index}: questions={numbers} speak order={' -> '.join(numbers)} "
+            f"repeats={repeats} cached={cached_in_round}/{len(results)}"
+        )
+    cached = sum(1 for from_cache in answers if from_cache)
     print(f"on_answer count: {len(answers)}")
     print(f"from_cache: fresh={len(answers) - cached} cached={cached}")
+    print(f"spoken items: {len(speaker.spoken)}")
+    print(
+        f"total: rounds={len(rounds)} answers={len(answers)} "
+        f"elapsed={time.monotonic() - started_at:.2f}s"
+    )
     if statuses:
         print(f"status: {'; '.join(statuses)}")
     if errors:

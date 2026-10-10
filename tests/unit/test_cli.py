@@ -178,6 +178,6 @@ def test_autopilot_dry_run_command_reports_answers(
     out = capsys.readouterr().out
     assert (
         result,
-        "on_answer count: 2" in out,
-        "from_cache: fresh=1 cached=1" in out,
+        "frame 1: questions=['1', '2', '3']" in out,
+        "from_cache: fresh=3 cached=3" in out,
     ) == (0, True, True)
