@@ -125,6 +125,12 @@ Phase 13 不新增依赖：拆题用 re + 现有 LLMClient（无效 regex 由 sp
 ## 5. 项目结构与文件职责速查
 
 ```
+.examchaiter/           # 运行时数据目录（gitignore）
+├─ config.json
+├─ index.json
+├─ sessions/
+└─ logs/
+
 src/examchaiter/
 ├─ config.py        Settings（pydantic-settings，前缀 EXAMCHAITER_）
 ├─ models.py        WindowInfo / OcrBlock / Question / Answer / QuestionType
@@ -276,9 +282,14 @@ class AppConfig:
 
 class ConfigStore:
     def __init__(self, base_dir: Path | None = None) -> None
-        # base_dir=None 时用 %APPDATA%/ExamChaiTer
+        # base_dir=None → default_base_dir()
+        # 构造时 mkdir(parents=True, exist_ok=True)
     @staticmethod
     def default_base_dir() -> Path
+        # 1. 若环境变量 EXAMCHAITER_STORAGE_DIR 非空 → 用它
+        # 2. 否则 → Path.cwd() / ".examchaiter"
+        # 3. 返回 .resolve()
+        # 4. 不再使用 %APPDATA%
     def load(self) -> AppConfig
         # 优先级：base_dir/config.json > 项目根 .env > AppConfig 默认值
         # config.json 不存在时返回基于 .env 的 AppConfig
@@ -310,6 +321,8 @@ class SessionMeta:
 
 class HistoryStore:
     def __init__(self, base_dir: Path | None = None) -> None
+        # base_dir=None → ConfigStore.default_base_dir()
+        # 构造时 mkdir(parents=True, exist_ok=True)
     def list_sessions(self) -> list[SessionMeta]
     def create_session(self, name: str) -> SessionMeta
         # name 为空时用当前时间 "YYYY-MM-DD-HHMM"
@@ -552,6 +565,10 @@ Tests: pytest tests/unit/test_xxx.py -q  (N passed)
 - [ ] 我是否跨 Phase 了？
 - [ ] 我的代码块是否完整，没有 `...省略...`？
 - [ ] 我是否给出了可执行的验证命令和 commit message？
+
+- 存储目录基于 `Path.cwd()`，启动前先 cd 到仓库根
+- `%APPDATA%` 已弃用；不自动迁移，用户手动复制旧数据到 `.examchaiter/`
+- 老版本的 `%APPDATA%\ExamChaiTer\` 内容原样保留，本版本不读、不写、不删
 
 ### Phase 9 打包坑清单
 
