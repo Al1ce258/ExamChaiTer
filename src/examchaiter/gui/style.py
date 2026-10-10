@@ -205,12 +205,9 @@ QCheckBox::indicator:checked {
 }
 QStatusBar {
 QListWidget#AnswerList {
-    background-color: %(bg_card)s;
+    background-color: #FFFFFF;
     border: none;
     padding: 4px;
-}
-QListWidget#AnswerList::item {
-    padding: 6px 8px;
 }
     background-color: %(bg_app)s;
     border-top: 1px solid %(border)s;

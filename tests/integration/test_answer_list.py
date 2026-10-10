@@ -74,3 +74,24 @@ def test_placeholder_row_is_disabled(qtbot: object) -> None:
     item = view.item(0)
 
     assert item is not None and item.flags() == Qt.ItemFlag.NoItemFlags
+
+
+def test_set_results_replaces_not_appends(qtbot: object) -> None:
+    view = AnswerList()
+    qtbot.addWidget(view)  # type: ignore[attr-defined]
+
+    view.set_results([_result("1", "A"), _result("2", "B"), _result("3", "C")])
+    view.set_results([_result("9", "D")])
+
+    assert (view.count(), view.row_texts()) == (1, ["[9] D"])
+
+
+def test_empty_then_results_no_ghost_items(qtbot: object) -> None:
+    view = AnswerList()
+    qtbot.addWidget(view)  # type: ignore[attr-defined]
+
+    view.set_results([_result("1", "A"), _result("2", "B")])
+    view.set_results([])
+    view.set_results([_result("3", "C")])
+
+    assert (view.count(), view.row_texts()) == (1, ["[3] C"])

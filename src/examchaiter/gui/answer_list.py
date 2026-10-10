@@ -60,12 +60,14 @@ class AnswerList(QListWidget):
         color: str = TEXT_PRIMARY,
     ) -> None:
         item = QListWidgetItem(plain)
-        item.setSizeHint(QSize(0, _ROW_HEIGHT))
         if disabled:
             item.setFlags(Qt.ItemFlag.NoItemFlags)
         self.addItem(item)
         label = QLabel(html)
         label.setTextFormat(Qt.TextFormat.RichText)
         label.setWordWrap(True)
-        label.setStyleSheet(f"font-size: {_ITEM_FONT_PT}pt; color: {color};")
+        label.setStyleSheet(
+            f"font-size: {_ITEM_FONT_PT}pt; color: {color}; background: transparent;"
+        )
+        item.setSizeHint(QSize(0, max(_ROW_HEIGHT, label.sizeHint().height())))
         self.setItemWidget(item, label)
