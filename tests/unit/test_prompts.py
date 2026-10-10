@@ -66,6 +66,12 @@ def test_build_messages_prompts_for_letter_only_answer() -> None:
     assert "只输出字母" in system and '返回 "?"' in system
 
 
+def test_build_messages_prompts_to_infer_missing_option_order() -> None:
+    system = str(build_messages("选项字母可能缺失")[0]["content"])
+
+    assert "按 A/B/C/D 的行顺序判断" in system
+
+
 @pytest.mark.parametrize(
     ("raw", "content"),
     [
