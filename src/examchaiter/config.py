@@ -5,6 +5,13 @@ from pathlib import Path
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+DEFAULT_SPLIT_PATTERNS: list[str] = [
+    r"^\s*(\d{1,3})[.、)．]\s*",
+    r"^\s*第\s*(\d{1,3})\s*题[.、:：]?\s*",
+    r"^\s*\(\s*(\d{1,3})\s*\)\s*",
+    r"^\s*[（(]\s*(\d{1,3})\s*[）)]\s*",
+]
+
 
 class Settings(BaseSettings):
     """Configuration loaded from EXAMCHAITER_* environment variables."""
@@ -26,6 +33,7 @@ class Settings(BaseSettings):
     settle_ms: int = Field(default=120, ge=0)
     dedup_threshold: int = Field(default=5, ge=0)
     min_text_len: int = Field(default=5, ge=0)
+    split_patterns: list[str] = Field(default_factory=lambda: list(DEFAULT_SPLIT_PATTERNS))
     clipboard: bool = False
     ocr_use_gpu: bool = False
     tts_interval_s: float = Field(default=3.0, gt=0.0)

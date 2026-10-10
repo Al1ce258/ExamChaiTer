@@ -10,6 +10,7 @@ from examchaiter.models import (
     PipelineResult,
     Question,
     QuestionType,
+    SplitQuestion,
     WindowInfo,
 )
 
@@ -18,6 +19,7 @@ from examchaiter.models import (
     ("question_type", "expected"),
     [
         (QuestionType.CHOICE, "choice"),
+        (QuestionType.MULTI_CHOICE, "multi_choice"),
         (QuestionType.FILL, "fill"),
         (QuestionType.SHORT, "short"),
         (QuestionType.UNKNOWN, "unknown"),
@@ -75,6 +77,12 @@ def test_pipeline_result_with_reuse_stores_true() -> None:
     )
 
     assert result.reused is True
+
+
+def test_split_question_without_number_defaults_to_empty() -> None:
+    question = SplitQuestion(text="题干")
+
+    assert question.question_no == ""
 
 
 def test_window_info_mutation_raises_validation_error() -> None:

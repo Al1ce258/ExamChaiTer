@@ -5,14 +5,14 @@ from __future__ import annotations
 import base64
 import json
 import os
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
 from pydantic import SecretStr
 
-from examchaiter.config import Settings
+from examchaiter.config import DEFAULT_SPLIT_PATTERNS, Settings
 from examchaiter.errors import StorageError
 
 DEFAULT_BASE_DIR_NAME = "ExamChaiTer"
@@ -31,6 +31,7 @@ _SETTINGS_FIELD_MAP: dict[str, str] = {
     "settle_ms": "settle_ms",
     "dedup_threshold": "dedup_threshold",
     "min_text_len": "min_text_len",
+    "split_patterns": "split_patterns",
     "clipboard": "clipboard",
     "log_level": "log_level",
 }
@@ -51,6 +52,7 @@ class AppConfig:
     settle_ms: int = 150
     dedup_threshold: int = 5
     min_text_len: int = 20
+    split_patterns: list[str] = field(default_factory=lambda: list(DEFAULT_SPLIT_PATTERNS))
     choice_with_text: bool = False
     clipboard: bool = True
     hotkey_answer: str = "<ctrl>+<alt>+q"
@@ -132,9 +134,9 @@ class ConfigStore:
     def save(self, cfg: AppConfig) -> None:
         """Persist ``cfg`` atomically, encrypting the API key when DPAPI is available."""
         payload: dict[str, Any] = {
-            field.name: getattr(cfg, field.name)
-            for field in fields(AppConfig)
-            if field.name != "llm_api_key"
+            app_field.name: getattr(cfg, app_field.name)
+            for app_field in fields(AppConfig)
+            if app_field.name != "llm_api_key"
         }
         if cfg.llm_api_key:
             marker, value = self._write_api_key(cfg.llm_api_key)
@@ -165,11 +167,11 @@ class ConfigStore:
             logger.warning("配置文件格式非法，回退到环境配置")
             return None
         config = AppConfig()
-        for field in fields(AppConfig):
-            if field.name == "llm_api_key":
+        for app_field in fields(AppConfig):
+            if app_field.name == "llm_api_key":
                 continue
-            if field.name in raw:
-                setattr(config, field.name, raw[field.name])
+            if app_field.name in raw:
+                setattr(config, app_field.name, raw[app_field.name])
         config.llm_api_key = self._read_api_key(raw)
         return config
 

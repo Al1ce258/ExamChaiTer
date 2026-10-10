@@ -7,7 +7,13 @@ from examchaiter.llm.client import (
     LLMTimeout,
     OpenAICompatClient,
 )
-from examchaiter.llm.prompts import build_messages, parse_answer
+from examchaiter.llm.prompts import (
+    build_messages,
+    build_split_messages,
+    parse_answer,
+    parse_split_response,
+)
+from examchaiter.llm.splitter import QuestionSplitter
 
 __all__ = [
     "FakeLLMClient",
@@ -15,6 +21,9 @@ __all__ = [
     "LLMFailed",
     "LLMTimeout",
     "OpenAICompatClient",
+    "QuestionSplitter",
     "build_messages",
+    "build_split_messages",
     "parse_answer",
+    "parse_split_response",
 ]

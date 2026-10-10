@@ -13,6 +13,7 @@ class QuestionType(StrEnum):
     """Supported answer shapes."""
 
     CHOICE = "choice"
+    MULTI_CHOICE = "multi_choice"
     FILL = "fill"
     SHORT = "short"
     UNKNOWN = "unknown"
@@ -55,3 +56,10 @@ class PipelineResult(_FrozenModel):
     question: Question
     answer: Answer
     reused: bool = False
+
+
+class SplitQuestion(_FrozenModel):
+    """One question extracted from a raw OCR text block."""
+
+    question_no: str = ""
+    text: str
