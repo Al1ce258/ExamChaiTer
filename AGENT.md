@@ -118,6 +118,8 @@ class ExamPipeline:
 
 Phase 10 不新增依赖：配置与历史存储用 JSON + pathlib 即可（无需 sqlite）；API Key 加密走已授权的 pywin32（win32crypt/DPAPI）。
 
+Phase 13 不新增依赖：拆题用 re + 现有 LLMClient（无效 regex 由 splitter 忽略）；schema v2 不写迁移（无真实用户数据）。
+
 ---
 
 ## 5. 项目结构与文件职责速查
@@ -135,7 +137,8 @@ src/examchaiter/
 │   └─ layout.py    blocks_to_text
 ├─ llm/
 │   ├─ client.py    LLMClient(Protocol) + OpenAICompatClient + FakeLLMClient
-│   └─ prompts.py   build_messages / parse_answer
+│   ├─ splitter.py  QuestionSplitter（正则优先 → LLM 兜底 → 单题降级）
+│   └─ prompts.py   build_messages / parse_answer / build_split_messages / parse_split_response
 ├─ output/
 │   ├─ formatter.py to_display_text / to_speech_text
 │   └─ presenter.py 控制台打印 + 写剪贴板
@@ -150,7 +153,7 @@ src/examchaiter/
 │   ├─ history_dialog.py # 历史面板（session 列表 + 搜索 + 详情）
 │   ├─ autopilot_bridge.py # AutoPilot ↔ Qt Signal 桥接（QObject）
 │   └─ state.py
-├─ pipeline.py      ExamPipeline.run_once() -> PipelineResult | None
+├─ pipeline.py      ExamPipeline.run_once() -> list[PipelineResult]
 ├─ app.py           ExamChaiTerApp（pynput 热键 + 主循环）
 └─ storage/
     ├─ __init__.py
@@ -168,20 +171,36 @@ ExamChaiTer.spec（仓库根）
 
 ```python
 # ---- models ----
-Answer.qtype: QuestionType           # CHOICE / FILL / SHORT / UNKNOWN
-Answer.content: str                  # ← 唯一对外输出，纯答案
+Answer.qtype: QuestionType           # CHOICE / MULTI_CHOICE / FILL / SHORT / UNKNOWN
+Answer.content: str                  # ← 唯一对外输出，纯答案（多选规范化为 "A B D"）
 @dataclass
 class PipelineResult:
     question: Question
     answer: Answer
     reused: bool = False
+    question_no: str = ""            # 新增，如 "1" / "2" / 空串表示无题号
+
+@dataclass
+class SplitQuestion:
+    question_no: str                 # 正则捕获的题号，LLM 拆分时也用，无题号时空串
+    text: str                        # 纯净题干（已去掉题号前缀、前后空白）
 
 # ---- pipeline ----
-ExamPipeline.run_once(hwnd: int) -> PipelineResult | None
+ExamPipeline.run_once(hwnd: int) -> list[PipelineResult]
+    # 返回类型从单个变列表；空列表表示本帧无效（无文字 / 窗口死）
+    # __init__ 追加 splitter: QuestionSplitter（必须注入）；另可注入 history_store + session_id 用于缓存/落库
 
 # ---- llm/prompts ----
-parse_answer(raw: str) -> Answer     # 任何输入都不抛异常，最差返回 UNKNOWN
+parse_answer(raw: str) -> Answer     # 任何输入都不抛异常，最差返回 UNKNOWN；多字母 → MULTI_CHOICE
 build_messages(question_text: str, images: list[bytes] | None = None) -> list[dict]
+build_split_messages(raw_text: str) -> list[dict]
+parse_split_response(raw: str) -> list[SplitQuestion]   # 解析失败返回 []，由调用方降级
+
+# ---- llm/splitter.py（新模块）----
+class QuestionSplitter:
+    def __init__(self, llm: LLMClient, settings: Settings) -> None
+    def split(self, raw_text: str) -> list[SplitQuestion]
+        # 正则优先 → LLM 兜底 → 单题降级（永不抛异常）
 
 # ---- tts ----
 LoopSpeaker(speaker: Speaker, interval_s: float = 3.0)
@@ -262,13 +281,14 @@ class ConfigStore:
     def to_settings(self) -> Settings
         # 返回 examchaiter.config.Settings 实例，用 AppConfig 字段覆盖默认值
 
-# ---- storage/history_store.py ----
+# ---- storage/history_store.py（schema v2）----
 @dataclass
 class HistoryEntry:
-    question_hash: str
-    question_text: str
-    answer_qtype: str
-    answer_content: str
+    question_no: str = ""                # 新增
+    question_hash: str = ""              # sha256(no + normalized_text)
+    question_text: str = ""
+    answer_qtype: str = ""
+    answer_content: str = ""
     model: str = ""
     latency_ms: int = 0
     created_at: float = 0.0
@@ -286,16 +306,18 @@ class HistoryStore:
     def create_session(self, name: str) -> SessionMeta
         # name 为空时用当前时间 "YYYY-MM-DD-HHMM"
         # 冲突时追加 "-2" "-3"
-    def load_session(self, session_id: str) -> dict[str, HistoryEntry]
-        # 返回 {question_hash: entry}
+    def load_session(self, session_id: str) -> list[HistoryEntry]   # 从 dict 改 list
+    def get_index(self, session_id: str) -> dict[str, HistoryEntry] # 新增，返回 {qhash: entry} 快速查
     def find_by_hash(self, session_id: str, qhash: str) -> HistoryEntry | None
-    def add_entry(self, session_id: str, entry: HistoryEntry, *, flush_now: bool = False) -> None
-        # 已存在同 hash → 更新（覆盖），不新增
+    def add_or_update_entry(self, session_id: str, entry: HistoryEntry, *, flush_now: bool = False) -> None
+        # 同 qhash 已存在 → 覆盖并保持原位置；不存在 → 追加到 entries 末尾
     def rename_session(self, session_id: str, new_name: str) -> bool
     def delete_session(self, session_id: str) -> bool
     def search(self, keyword: str, limit: int = 50) -> list[tuple[str, HistoryEntry]]
         # 跨 session 搜索 question_text 包含 keyword 的条目
         # 返回 [(session_id, entry), ...]
+    # session json 结构 v2：{schema_version: 2, name, created_at, entries: [HistoryEntry, ...]}
+    # 读到 schema_version != 2 → log.warning 并当作空 session（不迁移）
     # 禁止存截图；HistoryEntry 不含任何图像字段
 ```
 
@@ -459,6 +481,9 @@ settings          # 隔离的 Settings，全部默认值 + 可覆盖
 | 10    | 配置持久化 + 历史存储 | storage/*.py | ConfigStore + HistoryStore 可读写、可单测；API Key 加密存盘 |
 | 11    | AutoPilot 引擎 | autopilot.py + tts/speaker.py 扩展 | AutoPilot 纯逻辑可单测；Fake 依赖下能跑完整状态机；缓存命中不调 LLM；按题型朗读 N 遍；stop 后 200ms 内 is_running 为 False |
 | 12    | GUI 大改版 | gui/*.py | Windows 浅色风格（Segoe UI + #0078D4 主色 + 圆角按钮 + 卡片留白）；配置面板读写 %APPDATA%\ExamChaiTer\config.json；历史面板列出/切换/搜索 session；自动模式开关一次进入循环、再点停止；AutoPilot 回调全部经 Qt Signal 回主线程 |
+| 13    | 拆题引擎 + 多题返回 + schema v2 | llm/splitter.py, pipeline.py, storage/* | run_once 返回 list；题号落地；schema v2 |
+| 14    | AutoPilot 适配多题 + 顺序朗读 | autopilot.py, tts/speaker.py | 按题号顺序一题读透再下一题 |
+| 15    | GUI 适配多题 | gui/* | 答案列表展示 + 历史按题号 |
 
 每个 Phase 结束打 tag：`v0.1.0-phase<N>`。
 
@@ -545,6 +570,12 @@ Tests: pytest tests/unit/test_xxx.py -q  (N passed)
 - AutoPilot 在工作线程，GUI 更新必须走 QObject.Signal + QueuedConnection，禁止跨线程直接操作 widget
 - Qt 主线程不能调用 pipeline.run_once（会卡 UI），手动作答走 QTimer.singleShot(0) + 状态回填，或用 QThread
 - 配置对话框保存 API Key 时必须调用 ConfigStore.save（走 DPAPI），不得明文落盘
+
+### Phase 13 拆题/多题坑清单
+
+- run_once 现在是 list[PipelineResult]，所有旧调用方必须 for-each 处理
+- schema v2 不写迁移：v0.2.1 无真实用户数据，直接覆盖
+- 拆题 LLM 调用独立于答题 LLM 调用，走同一个 LLMClient（FakeLLMClient 需按顺序排队响应）
 
 ---
 
