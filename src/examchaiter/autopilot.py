@@ -271,10 +271,9 @@ class AutoPilot:
             return True
 
     def _speech_text(self, result: PipelineResult, index: int) -> str:
-        body = to_speech_text(result.answer)
-        if result.question_no:
-            return body
-        return f"第 {index + 1} 题，{body}"
+        return to_speech_text(
+            result.answer, question_no=result.question_no, fallback_index=index + 1
+        )
 
     def _repeat_for(self, qtype: QuestionType) -> int:
         repeats = {

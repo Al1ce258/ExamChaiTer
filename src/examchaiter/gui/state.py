@@ -116,10 +116,11 @@ class GuiController:
                 self.loop_speaker.stop()
                 self.state.tts_running = False
                 return False
-            if self.state.last_answer is None:
+            last = self.state.last_results[-1] if self.state.last_results else None
+            if last is None:
                 logger.warning("No answer available for TTS")
                 return False
-            self.loop_speaker.start(to_speech_text(self.state.last_answer))
+            self.loop_speaker.start(to_speech_text(last.answer, question_no=last.question_no))
             self.state.tts_running = True
             return True
         except Exception:

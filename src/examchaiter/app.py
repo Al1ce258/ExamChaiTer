@@ -157,7 +157,9 @@ class ExamChaiTerApp:
             if self._last_result is None:
                 logger.warning("No answer available for speech")
                 return
-            self.loop_speaker.start(to_speech_text(self._last_result.answer))
+            self.loop_speaker.start(
+                to_speech_text(self._last_result.answer, question_no=self._last_result.question_no)
+            )
         except Exception:
             logger.exception("TTS toggle hotkey failed")
 

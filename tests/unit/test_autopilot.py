@@ -325,7 +325,7 @@ def test_multi_question_round_reads_in_order() -> None:
     ) == (
         [("1", False), ("2", False), ("3", False)],
         [2, 3, 1],
-        ["答案是 A", "答案是 A、B、D", "填空：9"],
+        ["第 1 题，答案是 A", "第 2 题，答案是 A、B、D", "第 3 题，填空：9"],
     )
 
 
@@ -345,7 +345,7 @@ def test_multi_choice_uses_its_own_repeat() -> None:
     drive(deps)
     deps.autopilot.stop(timeout=1.0)
 
-    assert deps.loop.started == [("答案是 A、B、D", 7)]
+    assert deps.loop.started == [("第 1 题，答案是 A、B、D", 7)]
 
 
 def test_question_change_during_speaking_interrupts() -> None:
@@ -412,11 +412,11 @@ def test_on_round_done_called_once_per_frame() -> None:
 @pytest.mark.parametrize(
     ("llm_response", "expected_repeat", "expected_speech"),
     [
-        ('{"type":"choice","answer":"B"}', 5, "答案是 B"),
-        ('{"type":"multi_choice","answer":"ABD"}', 5, "答案是 A、B、D"),
-        ('{"type":"fill","answer":"42"}', 3, "填空：42"),
-        ('{"type":"short","answer":"因为"}', 1, "因为"),
-        ("", 1, "无法解析答案"),
+        ('{"type":"choice","answer":"B"}', 5, "第 1 题，答案是 B"),
+        ('{"type":"multi_choice","answer":"ABD"}', 5, "第 1 题，答案是 A、B、D"),
+        ('{"type":"fill","answer":"42"}', 3, "第 1 题，填空：42"),
+        ('{"type":"short","answer":"因为"}', 1, "第 1 题，因为"),
+        ("", 1, "第 1 题，无法解析答案"),
     ],
 )
 def test_repeat_count_by_qtype(
