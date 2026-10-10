@@ -188,7 +188,8 @@ class SplitQuestion:
 # ---- pipeline ----
 ExamPipeline.run_once(hwnd: int) -> list[PipelineResult]
     # 返回类型从单个变列表；空列表表示本帧无效（无文字 / 窗口死）
-    # __init__ 追加 splitter: QuestionSplitter（必须注入）；另可注入 history_store + session_id 用于缓存/落库
+    # __init__ 必填注入 splitter: QuestionSplitter + history_store + session_id（只答不存请显式传 NullHistoryStore）
+    # storage/history_store.py 提供 NullHistoryStore（find_by_hash→None、add_or_update_entry 空操作）
 
 # ---- llm/prompts ----
 parse_answer(raw: str) -> Answer     # 任何输入都不抛异常，最差返回 UNKNOWN；多字母 → MULTI_CHOICE
@@ -205,8 +206,11 @@ class QuestionSplitter:
 # ---- tts ----
 LoopSpeaker(speaker: Speaker, interval_s: float = 3.0)
     .start(text, max_repeats: int | None = None) / .stop() / .is_running() -> bool
-    # max_repeats=None → 无限循环（保持现有语义，既有测试不改）
-    # max_repeats=N    → 朗读 N 遍后线程自行退出，is_running() 变 False
+    .wait_done(timeout: float | None = None) -> bool
+    # max_repeats=None → 无限循环；max_repeats=N → 朗读 N 遍后线程自行退出
+    # wait_done：阻塞到 读完 / stop() / timeout；True=正常读完，False=超时或提前中断
+    # timeout=None 无限等；未 start 时立即返回 True
+    # 内部 _done_event：每次 start 清零，读完或 stop 时 set（stop 能立刻唤醒 wait_done）
     # 二次 start 先 stop 旧线程再起新线程
 
 # ---- 热键 ----
@@ -262,6 +266,7 @@ class AppConfig:
     auto_poll_interval: float = 1.5
     auto_stable_frames: int = 2
     auto_speak_choice_repeat: int = 5
+    auto_speak_multi_choice_repeat: int = 5
     auto_speak_fill_repeat: int = 3
     auto_speak_short_repeat: int = 1
     auto_speak_interval: float = 3.0
@@ -336,6 +341,7 @@ class AutoPilotConfig:
     poll_interval: float = 1.5
     stable_frames: int = 2
     speak_choice_repeat: int = 5
+    speak_multi_choice_repeat: int = 5
     speak_fill_repeat: int = 3
     speak_short_repeat: int = 1
     speak_interval: float = 3.0
@@ -345,6 +351,7 @@ class AutoPilotConfig:
 class AutoPilotCallbacks:
     on_state: Callable[[AutoPilotState], None]
     on_answer: Callable[[PipelineResult, bool], None]   # (result, from_cache)
+    on_round_done: Callable[[list[PipelineResult]], None]  # 一帧所有题作答完成（可选，默认 no-op）
     on_status: Callable[[str], None]
     on_error: Callable[[Exception], None]
 
@@ -354,6 +361,7 @@ class AutoPilot:
         capture,            # 需提供 grab_window(hwnd) 与 dhash(img)
         ocr,                # OcrEngine
         llm,                # LLMClient
+        splitter,           # QuestionSplitter（必须注入）
         loop_speaker,       # LoopSpeaker
         history_store,      # HistoryStore
         session_id: str,
@@ -361,6 +369,7 @@ class AutoPilot:
         callbacks: AutoPilotCallbacks,
         *,
         _sleep: Callable[[float], None] | None = None,  # 测试注入
+        _wait_done_timeout: float = 30.0,  # 朗读兜底超时（防 TTS 卡死）
     ) -> None
     def start(self, hwnd: int) -> None          # 非阻塞，起工作线程
     def stop(self, timeout: float = 2.0) -> None  # 幂等
@@ -482,7 +491,7 @@ settings          # 隔离的 Settings，全部默认值 + 可覆盖
 | 11    | AutoPilot 引擎 | autopilot.py + tts/speaker.py 扩展 | AutoPilot 纯逻辑可单测；Fake 依赖下能跑完整状态机；缓存命中不调 LLM；按题型朗读 N 遍；stop 后 200ms 内 is_running 为 False |
 | 12    | GUI 大改版 | gui/*.py | Windows 浅色风格（Segoe UI + #0078D4 主色 + 圆角按钮 + 卡片留白）；配置面板读写 %APPDATA%\ExamChaiTer\config.json；历史面板列出/切换/搜索 session；自动模式开关一次进入循环、再点停止；AutoPilot 回调全部经 Qt Signal 回主线程 |
 | 13    | 拆题引擎 + 多题返回 + schema v2 | llm/splitter.py, pipeline.py, storage/* | run_once 返回 list；题号落地；schema v2 |
-| 14    | AutoPilot 适配多题 + 顺序朗读 | autopilot.py, tts/speaker.py | 按题号顺序一题读透再下一题 |
+| 14    | AutoPilot 适配多题 + 顺序朗读 | autopilot.py, tts/speaker.py | AutoPilot 一帧多题时按题号顺序朗读；朗读期间题目变化 200ms 内中断；LoopSpeaker.wait_done 在读完/stop/超时三种情况下都正确返回 |
 | 15    | GUI 适配多题 | gui/* | 答案列表展示 + 历史按题号 |
 
 每个 Phase 结束打 tag：`v0.1.0-phase<N>`。
@@ -576,6 +585,11 @@ Tests: pytest tests/unit/test_xxx.py -q  (N passed)
 - run_once 现在是 list[PipelineResult]，所有旧调用方必须 for-each 处理
 - schema v2 不写迁移：v0.2.1 无真实用户数据，直接覆盖
 - 拆题 LLM 调用独立于答题 LLM 调用，走同一个 LLMClient（FakeLLMClient 需按顺序排队响应）
+
+### Phase 14 顺序朗读坑清单
+
+- LoopSpeaker.wait_done 必须能被 stop() 立刻唤醒，不能只靠 max_repeats 结束
+- AutoPilot 顺序朗读时用 wait_done(timeout=_wait_done_timeout) 兜底，防止 TTS 引擎卡死导致主循环永不前进
 
 ---
 
