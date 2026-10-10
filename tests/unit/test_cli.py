@@ -1,6 +1,7 @@
 """Unit tests for the offline command-line entry point."""
 
 import sys
+from pathlib import Path
 
 import pytest
 from pytest_mock import MockerFixture
@@ -10,7 +11,9 @@ from examchaiter.config import Settings
 
 
 @pytest.fixture(autouse=True)
-def _isolate_cli_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+def _isolate_cli_settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("EXAMCHAITER_STORAGE_DIR", raising=False)
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
         "examchaiter.__main__.Settings",
         lambda: Settings(_env_file=None),
@@ -61,6 +64,14 @@ def test_show_config_command_includes_default_model(capsys: pytest.CaptureFixtur
     main(["show-config"])
 
     assert "llm_model=gpt-4o-mini" in capsys.readouterr().out
+
+
+def test_show_config_command_includes_storage_dir(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    main(["show-config"])
+
+    assert f"storage_dir={(tmp_path / '.examchaiter').resolve()}" in capsys.readouterr().out
 
 
 def test_help_flag_prints_help(capsys: pytest.CaptureFixture[str]) -> None:

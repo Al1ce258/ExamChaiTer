@@ -52,22 +52,51 @@ def _break_win32crypt(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def test_default_base_dir_uses_appdata(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("APPDATA", r"C:\AppData\Roaming")
+def test_default_base_dir_uses_env_var(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    target = tmp_path / "x"
+    monkeypatch.setenv("EXAMCHAITER_STORAGE_DIR", str(target))
 
-    assert ConfigStore.default_base_dir() == Path(r"C:\AppData\Roaming") / "ExamChaiTer"
+    assert ConfigStore.default_base_dir() == target.resolve()
 
 
-def test_default_base_dir_without_appdata_uses_home(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("APPDATA", raising=False)
+def test_default_base_dir_falls_back_to_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("EXAMCHAITER_STORAGE_DIR", raising=False)
+    monkeypatch.chdir(tmp_path)
 
-    assert ConfigStore.default_base_dir() == Path.home() / "ExamChaiTer"
+    assert ConfigStore.default_base_dir() == (tmp_path / ".examchaiter").resolve()
+
+
+def test_default_base_dir_empty_env_var_is_ignored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("EXAMCHAITER_STORAGE_DIR", "")
+    monkeypatch.chdir(tmp_path)
+
+    assert ConfigStore.default_base_dir() == (tmp_path / ".examchaiter").resolve()
+
+
+def test_no_apdata_usage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("EXAMCHAITER_STORAGE_DIR", raising=False)
+    monkeypatch.setenv("APPDATA", "C:/fake")
+    monkeypatch.chdir(tmp_path)
+
+    assert "fake" not in ConfigStore.default_base_dir().parts
 
 
 def test_config_path_is_under_base_dir(tmp_path: Path) -> None:
     store = ConfigStore(tmp_path)
 
     assert store.config_path == tmp_path / "config.json"
+
+
+def test_constructor_creates_missing_base_dir(tmp_path: Path) -> None:
+    base_dir = tmp_path / "nested" / "config"
+
+    ConfigStore(base_dir)
+
+    assert base_dir.is_dir()
 
 
 def test_load_with_empty_dir_returns_defaults(tmp_path: Path, isolated_env: None) -> None:

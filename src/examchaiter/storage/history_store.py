@@ -14,7 +14,7 @@ from typing import Any, Protocol
 from loguru import logger
 
 from examchaiter.errors import StorageError
-from examchaiter.storage.config_store import ConfigStore
+from examchaiter.storage.config_store import resolve_storage_dir
 
 SESSIONS_DIRNAME = "sessions"
 INDEX_FILENAME = "index.json"
@@ -96,11 +96,16 @@ class HistoryStore:
     """Manage ``base_dir/sessions/*.json`` plus a ``base_dir/index.json`` summary."""
 
     def __init__(self, base_dir: Path | None = None) -> None:
-        self._base_dir = Path(base_dir) if base_dir is not None else ConfigStore.default_base_dir()
+        self._base_dir = Path(base_dir) if base_dir is not None else self.default_base_dir()
+        self._base_dir.mkdir(parents=True, exist_ok=True)
         self._sessions_dir = self._base_dir / SESSIONS_DIRNAME
         self._index_path = self._base_dir / INDEX_FILENAME
         self._cache: dict[str, _Session] = {}
         self._dirty: set[str] = set()
+
+    @staticmethod
+    def default_base_dir() -> Path:
+        return resolve_storage_dir()
 
     @property
     def base_dir(self) -> Path:
@@ -309,7 +314,7 @@ class NullHistoryStore:
     """No-op store for explicit "answer without persistence" runs."""
 
     def __init__(self, base_dir: Path | None = None) -> None:
-        self._base_dir = Path(base_dir) if base_dir is not None else ConfigStore.default_base_dir()
+        self._base_dir = Path(base_dir) if base_dir is not None else resolve_storage_dir()
 
     @property
     def base_dir(self) -> Path:

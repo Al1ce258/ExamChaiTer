@@ -31,6 +31,39 @@ def _entry(
     )
 
 
+def test_default_base_dir_uses_env_var(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    target = tmp_path / "x"
+    monkeypatch.setenv("EXAMCHAITER_STORAGE_DIR", str(target))
+
+    assert HistoryStore.default_base_dir() == target.resolve()
+
+
+def test_default_base_dir_falls_back_to_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("EXAMCHAITER_STORAGE_DIR", raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    assert HistoryStore.default_base_dir() == (tmp_path / ".examchaiter").resolve()
+
+
+def test_default_base_dir_empty_env_var_is_ignored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("EXAMCHAITER_STORAGE_DIR", "")
+    monkeypatch.chdir(tmp_path)
+
+    assert HistoryStore.default_base_dir() == (tmp_path / ".examchaiter").resolve()
+
+
+def test_no_apdata_usage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("EXAMCHAITER_STORAGE_DIR", raising=False)
+    monkeypatch.setenv("APPDATA", "C:/fake")
+    monkeypatch.chdir(tmp_path)
+
+    assert "fake" not in HistoryStore.default_base_dir().parts
+
+
 def test_history_entry_has_no_image_fields() -> None:
     assert {field.name for field in fields(HistoryEntry)} == {
         "question_no",
@@ -48,6 +81,14 @@ def test_create_session_with_empty_name_uses_date_format(tmp_path: Path) -> None
     meta = HistoryStore(tmp_path).create_session("")
 
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}-\d{4}", meta.session_id)
+
+
+def test_constructor_creates_missing_base_dir(tmp_path: Path) -> None:
+    base_dir = tmp_path / "nested" / "history"
+
+    HistoryStore(base_dir)
+
+    assert base_dir.is_dir()
 
 
 def test_null_history_store_is_a_noop(tmp_path: Path) -> None:

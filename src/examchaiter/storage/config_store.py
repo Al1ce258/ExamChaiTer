@@ -15,7 +15,8 @@ from pydantic import SecretStr
 from examchaiter.config import DEFAULT_SPLIT_PATTERNS, Settings
 from examchaiter.errors import StorageError
 
-DEFAULT_BASE_DIR_NAME = "ExamChaiTer"
+STORAGE_DIR_ENV = "EXAMCHAITER_STORAGE_DIR"
+DEFAULT_STORAGE_DIR_NAME = ".examchaiter"
 CONFIG_FILENAME = "config.json"
 
 # AppConfig field -> Settings field for the fields Settings already exposes.
@@ -102,20 +103,27 @@ def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
         raise StorageError(f"无法写入 {path.name}") from exc
 
 
+def resolve_storage_dir() -> Path:
+    """Resolve the local runtime data directory without touching legacy APPDATA data."""
+
+    configured = os.environ.get(STORAGE_DIR_ENV, "").strip()
+    root = Path(configured) if configured else Path.cwd() / DEFAULT_STORAGE_DIR_NAME
+    return root.expanduser().resolve()
+
+
 class ConfigStore:
     """Read and write :class:`AppConfig` under a base directory."""
 
     def __init__(self, base_dir: Path | None = None) -> None:
         self._base_dir = Path(base_dir) if base_dir is not None else self.default_base_dir()
+        self._base_dir.mkdir(parents=True, exist_ok=True)
         self._config_path = self._base_dir / CONFIG_FILENAME
         self._config: AppConfig | None = None
         self._warned_plaintext = False
 
     @staticmethod
     def default_base_dir() -> Path:
-        appdata = os.environ.get("APPDATA")
-        root = Path(appdata) if appdata else Path.home()
-        return root / DEFAULT_BASE_DIR_NAME
+        return resolve_storage_dir()
 
     @property
     def base_dir(self) -> Path:

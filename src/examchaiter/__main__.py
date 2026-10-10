@@ -71,7 +71,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.command == "show-config":
-        for key, value in sorted(_display_settings(Settings()).items()):
+        from examchaiter.storage import ConfigStore
+
+        storage_store = ConfigStore()
+        values = _display_settings(Settings())
+        values["storage_dir"] = storage_store.base_dir
+        for key, value in sorted(values.items()):
             print(f"{key}={value}")
 
     if args.command == "ocr-self-test":
