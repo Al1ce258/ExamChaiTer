@@ -53,6 +53,7 @@ class AppConfig:
     dedup_threshold: int = 5
     min_text_len: int = 20
     split_patterns: list[str] = field(default_factory=lambda: list(DEFAULT_SPLIT_PATTERNS))
+    ocr_upscale: float = 1.0
     choice_with_text: bool = False
     clipboard: bool = True
     hotkey_answer: str = "<ctrl>+<alt>+q"

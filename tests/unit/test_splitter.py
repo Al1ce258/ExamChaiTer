@@ -115,3 +115,24 @@ def test_split_swallows_unexpected_errors() -> None:
     splitter = QuestionSplitter(FakeLLMClient(responses=[]), BoomSettings())  # type: ignore[arg-type]
 
     assert splitter.split("text") == [SplitQuestion(question_no="", text="text")]
+
+
+def test_split_patterns_supports_cjk_brackets() -> None:
+    questions = _splitter().split("【1】甲题内容甲乙\n【2】乙题内容甲乙")
+
+    assert [(q.question_no, q.text) for q in questions] == [
+        ("1", "甲题内容甲乙"),
+        ("2", "乙题内容甲乙"),
+    ]
+
+
+def test_split_patterns_supports_timu_prefix() -> None:
+    questions = _splitter().split("题目1：甲题内容甲乙\n题目2：乙题内容甲乙")
+
+    assert [q.question_no for q in questions] == ["1", "2"]
+
+
+def test_split_patterns_supports_cjk_numbered_list() -> None:
+    questions = _splitter().split("一、甲题内容甲乙\n二、乙题内容甲乙")
+
+    assert [q.text for q in questions] == ["甲题内容甲乙", "乙题内容甲乙"]

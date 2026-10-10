@@ -60,6 +60,12 @@ def test_build_messages_system_prompt_requires_json_only() -> None:
     assert "只输出 JSON" in SYSTEM_PROMPT
 
 
+def test_build_messages_prompts_for_letter_only_answer() -> None:
+    system = str(build_messages("题干没有选项字母")[0]["content"])
+
+    assert "只输出字母" in system and '返回 "?"' in system
+
+
 @pytest.mark.parametrize(
     ("raw", "content"),
     [
