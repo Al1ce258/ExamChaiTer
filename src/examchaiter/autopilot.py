@@ -45,6 +45,10 @@ class AutoPilotState(str, Enum):  # noqa: UP042 - contract fixes (str, Enum) exp
     ERROR = "error"
 
 
+# Tolerate small repaint/cursor noise while detecting a substantial frame change.
+_FRAME_CHANGE_HAMMING_THRESHOLD = 10
+
+
 @dataclass
 class AutoPilotConfig:
     """Tunables for one AutoPilot run."""
@@ -265,7 +269,8 @@ class AutoPilot:
 
     def _frame_changed(self, hwnd: int, frame_hash: int) -> bool:
         try:
-            return self._capture.dhash(self._capture.grab_window(hwnd)) != frame_hash
+            new_hash = self._capture.dhash(self._capture.grab_window(hwnd))
+            return (new_hash ^ frame_hash).bit_count() > _FRAME_CHANGE_HAMMING_THRESHOLD
         except Exception:
             logger.warning("朗读期间帧检测失败，按已变化处理")
             return True

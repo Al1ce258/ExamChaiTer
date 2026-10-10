@@ -355,7 +355,7 @@ def test_question_change_during_speaking_interrupts() -> None:
             SplitQuestion(question_no="2", text="第二题内容"),
         ]
     )
-    deps = build([1, 1, 9], iterations=3, splitter=splitter)
+    deps = build([1, 1, 4095], iterations=3, splitter=splitter)
     deps.llm.complete.side_effect = [
         '{"type":"choice","answer":"B"}',
         '{"type":"choice","answer":"C"}',
@@ -364,6 +364,27 @@ def test_question_change_during_speaking_interrupts() -> None:
     deps.autopilot.stop(timeout=1.0)
 
     assert len(deps.loop.started) == 1 and len(deps.recorder.rounds) == 1
+
+
+def test_multi_question_round_tolerates_minor_frame_noise() -> None:
+    splitter = FakeSplitter(
+        [
+            SplitQuestion(question_no="1", text="第一题内容"),
+            SplitQuestion(question_no="2", text="第二题内容"),
+        ]
+    )
+    deps = build([1, 1, 4, 1], iterations=3, splitter=splitter)
+    deps.llm.complete.side_effect = [
+        '{"type":"choice","answer":"B"}',
+        '{"type":"choice","answer":"C"}',
+    ]
+    drive(deps)
+    deps.autopilot.stop(timeout=1.0)
+
+    assert [text for text, _repeat in deps.loop.started] == [
+        "第 1 题，答案是 B",
+        "第 2 题，答案是 C",
+    ]
 
 
 def test_no_number_question_gets_sequential_prefix() -> None:
