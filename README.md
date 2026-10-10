@@ -1,6 +1,6 @@
 # ExamChaiTer
 
-**状态：v0.3.0 完成，支持多题识别、按题号顺序朗读、题号级缓存（exe 打包为实验性，见下方说明）**
+**状态：v0.3.2 完成，支持多题识别、按题号顺序朗读、题号级缓存与项目本地存储（exe 打包为实验性，见下方说明）**
 
 ExamChaiTer 是一个 Windows 本地工具：聚焦指定窗口 -> 截图 -> OCR -> 调用
 OpenAI 兼容接口 -> 仅输出答案 -> 可选循环语音朗读。
@@ -21,6 +21,8 @@ OpenAI 兼容接口 -> 仅输出答案 -> 可选循环语音朗读。
 2. 安装锁定依赖：`uv sync`
 3. 启动 GUI：`uv run python -m examchaiter gui`
 4. 首次打开点“配置”填写 API Key（保存后重启生效）
+
+请在仓库根目录执行上述命令；默认运行时数据目录基于启动时的工作目录生成。
 
 `.env`、`debug/`、`logs/`、真实考试截图、模型权重和 API Key 都不得提交。
 
@@ -43,15 +45,26 @@ OpenAI 兼容接口 -> 仅输出答案 -> 可选循环语音朗读。
 
 ## 配置文件位置
 
-`%APPDATA%\ExamChaiTer\config.json`，API Key 用 DPAPI 加密存储。
+- 默认位置：`.examchaiter/config.json`（与启动时的工作目录同级）
+- 可通过环境变量 `EXAMCHAITER_STORAGE_DIR` 覆盖存储目录
+- API Key 用 DPAPI 加密（`api_key_enc` 字段）
+- `.examchaiter/` 已加入 `.gitignore`，不会误提交
 
 主要配置项：`split_patterns`（拆题正则数组，高级用户可自定义）、`auto_speak_multi_choice_repeat`（多选朗读次数，默认 5）。
 
 ## 历史文件位置
 
-`%APPDATA%\ExamChaiTer\sessions\*.json`（汇总在 `index.json`）。
+`.examchaiter/sessions/*.json`（汇总在 `.examchaiter/index.json`）。
 
 每条记录含 `question_no`，按题目出现顺序排列（session JSON 为 schema v2 的 `entries` 列表）。
+
+## 从旧版本升级
+
+v0.3.1 及更早版本的数据位于 `%APPDATA%\ExamChaiTer\`。
+
+- 想保留旧数据：手动把 `%APPDATA%\ExamChaiTer\` 下的 `config.json`、`index.json` 和 `sessions/` 复制到项目根的 `.examchaiter/` 下
+- 不想保留：直接忽略旧目录，首次启动会在项目根重新生成空的 `.examchaiter/`
+- 本版本不读取、不写入、也不删除旧 `%APPDATA%\ExamChaiTer\` 数据
 
 ## 推荐启动方式
 
