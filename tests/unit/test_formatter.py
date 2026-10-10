@@ -10,6 +10,7 @@ from examchaiter.output.formatter import to_display_text, to_speech_text
     ("qtype", "content", "display", "speech"),
     [
         (QuestionType.CHOICE, "B", "答案：B", "答案是 B"),
+        (QuestionType.MULTI_CHOICE, "A B D", "答案：A B D", "答案是 A、B、D"),
         (QuestionType.FILL, "42", "填空：42", "填空：42"),
         (QuestionType.SHORT, "简答内容", "简答内容", "简答内容"),
         (QuestionType.UNKNOWN, "raw", "⚠️ 无法解析", "无法解析答案"),
