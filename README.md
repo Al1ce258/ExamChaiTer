@@ -1,6 +1,6 @@
 # ExamChaiTer
 
-**状态：v0.3.2 完成，支持多题识别、按题号顺序朗读、题号级缓存与项目本地存储（exe 打包为实验性，见下方说明）**
+**状态：v0.3.5 完成，支持多题识别、按题号顺序朗读、题号级缓存与项目本地存储（exe 打包为实验性，见下方说明）**
 
 ExamChaiTer 是一个 Windows 本地工具：聚焦指定窗口 -> 截图 -> OCR -> 调用
 OpenAI 兼容接口 -> 仅输出答案 -> 可选循环语音朗读。
@@ -19,8 +19,10 @@ OpenAI 兼容接口 -> 仅输出答案 -> 可选循环语音朗读。
 
 1. 克隆仓库：`git clone <仓库地址> && cd ExamChaiTer`
 2. 安装锁定依赖：`uv sync`
-3. 启动 GUI：`uv run python -m examchaiter gui`
-4. 首次打开点“配置”填写 API Key（保存后重启生效）
+3. 启动 GUI：`uv run python -m examchaiter gui`（**不需要 Key 即可启动**）
+4. 点“配置” → 填 LLM Base URL（含 `/v1`）/ API Key / 模型 → 保存
+5. 关闭 GUI，重新启动（配置生效）
+6. 下拉框选目标窗口 → 点“作答一次”
 
 请在仓库根目录执行上述命令；默认运行时数据目录基于启动时的工作目录生成。
 
@@ -51,6 +53,25 @@ OpenAI 兼容接口 -> 仅输出答案 -> 可选循环语音朗读。
 - `.examchaiter/` 已加入 `.gitignore`，不会误提交
 
 主要配置项：`split_patterns`（拆题正则数组，高级用户可自定义）、`auto_speak_multi_choice_repeat`（多选朗读次数，默认 5）。
+
+## 跨机器部署
+
+- `config.json` 里的 `api_key_enc` 用 Windows DPAPI 加密，**跨机器无法解密**（换机器/重装系统后失效）
+- 换机器后启动 GUI，状态栏会提示“未配置 API Key”，GUI 仍可正常打开
+- 点“配置”重新填一次 API Key 即可，旧配置的其他字段保留
+- 若同时存在项目根 `.env`，解密失败后会自动回落到 `.env` 里的 Key
+
+## 配置优先级
+
+`ConfigStore` 读 API Key 的优先级：
+
+1. `config.json` 里的 `api_key_enc`（DPAPI 解密成功）
+2. `config.json` 里的 `llm_api_key`（明文，向后兼容）
+3. 环境变量（`EXAMCHAITER_LLM_API_KEY`）
+4. `.env` 文件
+5. 默认值（无 Key）
+
+`config.json` 里没有的字段（或值为 `null`）不会覆盖低优先级的值，因此 `.env` 里的 Key 不会再被空配置吃掉。
 
 ## 历史文件位置
 
