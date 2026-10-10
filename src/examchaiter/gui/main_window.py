@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
+    QDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -23,6 +24,7 @@ from PySide6.QtWidgets import (
 
 from examchaiter.config import Settings
 from examchaiter.gui.autopilot_bridge import AutoPilotBridge
+from examchaiter.gui.config_dialog import ConfigDialog
 from examchaiter.gui.state import GuiController
 from examchaiter.gui.style import apply_style
 from examchaiter.models import PipelineResult
@@ -100,6 +102,7 @@ class MainWindow(QMainWindow):
         self.toggle_button.clicked.connect(self.on_toggle_tts_clicked)
         self.auto_checkbox.toggled.connect(self.on_auto_toggled)
         self.quit_button.clicked.connect(self.on_quit_clicked)
+        self.config_button.clicked.connect(self.open_config_dialog)
         self.bridge.state_changed.connect(self._on_auto_state)
         self.bridge.answer_ready.connect(self._on_answer_ready)
         self.bridge.status_message.connect(self._on_status_message)
@@ -140,6 +143,11 @@ class MainWindow(QMainWindow):
         self.controller.stop_tts()
         self.controller.stop_auto()
         self.hide()
+
+    def open_config_dialog(self) -> None:
+        dialog = ConfigDialog(self.controller, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            QMessageBox.information(self, "配置", "配置已保存，重启后生效")
 
     def _on_window_changed(self, index: int) -> None:
         hwnd = self.window_combo.itemData(index)
