@@ -461,6 +461,17 @@ def _run_debug_capture(
 
     splitter = QuestionSplitter(llm, settings)
     questions = splitter.split(layout_text)
+    file_labels: list[str] = []
+    used_labels: set[str] = set()
+    for index, question in enumerate(questions, start=1):
+        base = question.question_no.strip() or str(index)
+        label = base
+        suffix = 2
+        while label in used_labels:
+            label = f"{base}-{suffix}"
+            suffix += 1
+        used_labels.add(label)
+        file_labels.append(label)
     _write_json(
         run_dir / "05_split_result.json",
         {
@@ -471,18 +482,7 @@ def _run_debug_capture(
         },
     )
 
-    labels: list[str] = []
-    used_labels: set[str] = set()
-    for index, question in enumerate(questions, start=1):
-        base = question.question_no.strip() or str(index)
-        label = base
-        suffix = 2
-        while label in used_labels:
-            label = f"{base}-{suffix}"
-            suffix += 1
-        used_labels.add(label)
-        labels.append(label)
-
+    for label, question in zip(file_labels, questions, strict=True):
         messages = build_messages(question.text)
         _write_json(run_dir / f"06_messages_{label}.json", messages)
         try:
@@ -501,11 +501,17 @@ def _run_debug_capture(
     print(f"图: {width}x{height} 亮度={brightness:.2f}")
     print(f"OCR 块数: {len(blocks)}")
     print(f"layout 文本长度: {len(layout_text)}")
-    print(f"拆题: mode={splitter.last_mode} 题数={len(questions)} 题号={labels}")
-    for label in labels:
+    print(
+        f"拆题: mode={splitter.last_mode} 题数={len(questions)} "
+        f"题号={[question.question_no for question in questions]}"
+    )
+    for label, question in zip(file_labels, questions, strict=True):
         parsed_path = run_dir / f"08_parsed_answer_{label}.json"
         payload = json.loads(parsed_path.read_text(encoding="utf-8"))
-        print(f"每题 LLM: no={label} qtype={payload['qtype']} answer={payload['content']}")
+        print(
+            f"每题 LLM: no={question.question_no} "
+            f"qtype={payload['qtype']} answer={payload['content']}"
+        )
     print("================================")
     print(f"输出目录: {run_dir}")
     return 0

@@ -225,7 +225,7 @@ def test_debug_capture_with_missing_window_exits_nonzero(
     assert result != 0
 
 
-def test_debug_capture_writes_all_files(tmp_path: Path) -> None:
+def test_debug_capture_writes_all_files(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     layout_text = "这是一道诊断题，请选择 A/B/C/D。"
     window = WindowInfo(hwnd=7, title="记事本", rect=(0, 0, 160, 80))
     ocr = FakeOcrEngine(
@@ -233,7 +233,7 @@ def test_debug_capture_writes_all_files(tmp_path: Path) -> None:
     )
     llm = FakeLLMClient(
         responses=[
-            json.dumps([{"no": "1", "text": layout_text}], ensure_ascii=False),
+            json.dumps([{"no": "", "text": f"1. {layout_text}"}], ensure_ascii=False),
             '{"type":"choice","answer":"B"}',
         ]
     )
@@ -268,4 +268,6 @@ def test_debug_capture_writes_all_files(tmp_path: Path) -> None:
         "08_parsed_answer_1.json",
     }
     split_payload = json.loads((run_dir / "05_split_result.json").read_text(encoding="utf-8"))
-    assert "mode" in split_payload
+    assert split_payload["mode"] == "llm"
+    assert split_payload["questions"] == [{"no": "1", "text": layout_text}]
+    assert "题号=['1']" in capsys.readouterr().out
