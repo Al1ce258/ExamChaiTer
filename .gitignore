@@ -31,6 +31,12 @@ Desktop.ini
 *.wav
 *.mp3
 *.screenshot.png
+*.bak
+*.spec.bak
+debug_exe.bat
+run_debug.bat
+out.txt
+err.txt
 
 debug/
 logs/
