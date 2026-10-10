@@ -1,6 +1,6 @@
 # ExamChaiTer
 
-**状态：v0.2.0 Phase 11 完成，AutoPilot 引擎就绪（exe 打包为实验性，见下方说明）**
+**状态：v0.2.0 完成，GUI 支持配置、历史与自动模式（exe 打包为实验性，见下方说明）**
 
 ExamChaiTer 是一个 Windows 本地工具：聚焦指定窗口 -> 截图 -> OCR -> 调用
 OpenAI 兼容接口 -> 仅输出答案 -> 可选循环语音朗读。
@@ -19,10 +19,27 @@ OpenAI 兼容接口 -> 仅输出答案 -> 可选循环语音朗读。
 
 1. 克隆仓库：`git clone <仓库地址> && cd ExamChaiTer`
 2. 安装锁定依赖：`uv sync`
-3. 创建本地配置，并填写 `EXAMCHAITER_LLM_API_KEY`：`copy .env.example .env`
-4. 启动推荐 GUI：`uv run python -m examchaiter gui`
+3. 启动 GUI：`uv run python -m examchaiter gui`
+4. 首次打开点“配置”填写 API Key（保存后重启生效）
 
 `.env`、`debug/`、`logs/`、真实考试截图、模型权重和 API Key 都不得提交。
+
+> 仍兼容 `.env`：`config.json` 不存在时会回退到项目根 `.env`。命令行不改也行。
+
+## 界面功能
+
+- 主窗口：窗口选择 / 刷新 / 题目预览 / 答案展示 / 状态栏
+- 配置按钮：可视化编辑 LLM Key、模型、TTS 语速、自动模式节奏
+- 历史按钮：查看每场考试记录，支持搜索与删除 session
+- 自动模式：勾选后循环识别→作答→朗读，题目变化自动切换，再点停止
+
+## 配置文件位置
+
+`%APPDATA%\ExamChaiTer\config.json`，API Key 用 DPAPI 加密存储。
+
+## 历史文件位置
+
+`%APPDATA%\ExamChaiTer\sessions\*.json`（汇总在 `index.json`）。
 
 ## 推荐启动方式
 
