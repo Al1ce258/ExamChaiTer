@@ -74,6 +74,10 @@ omit = [
     "src/examchaiter/gui/main_window.py",
     "src/examchaiter/gui/tray.py",
     "src/examchaiter/gui/overlay.py",
+    "src/examchaiter/gui/style.py",
+    "src/examchaiter/gui/config_dialog.py",
+    "src/examchaiter/gui/history_dialog.py",
+    "src/examchaiter/gui/autopilot_bridge.py",
 ]
 
 [tool.coverage.report]

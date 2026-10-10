@@ -145,6 +145,10 @@ src/examchaiter/
 │   ├─ main_window.py
 │   ├─ tray.py
 │   ├─ overlay.py
+│   ├─ style.py          # Windows 浅色 QSS（apply_style）
+│   ├─ config_dialog.py  # 配置对话框（读写 ConfigStore）
+│   ├─ history_dialog.py # 历史面板（session 列表 + 搜索 + 详情）
+│   ├─ autopilot_bridge.py # AutoPilot ↔ Qt Signal 桥接（QObject）
 │   └─ state.py
 ├─ pipeline.py      ExamPipeline.run_once() -> PipelineResult | None
 ├─ app.py           ExamChaiTerApp（pynput 热键 + 主循环）
@@ -373,6 +377,38 @@ class AutoPilot:
 # 全部异常捕获后调 on_error，不让工作线程崩溃
 ```
 
+```python
+# ---- gui/autopilot_bridge.py ----
+class AutoPilotBridge(QObject):
+    state_changed = Signal(str)              # AutoPilotState.value
+    answer_ready = Signal(object, bool)      # (PipelineResult, from_cache)
+    status_message = Signal(str)
+    error_occurred = Signal(object)
+    def make_callbacks(self) -> AutoPilotCallbacks
+    # make_callbacks 返回的 callbacks 内部全部走 .emit()，保证跨线程安全
+
+# ---- gui/state.py 扩展 GuiController ----
+class GuiController:
+    # 新增：构造参数追加 config_store, history_store, autopilot_factory
+    def __init__(self, pipeline_factory, loop_speaker, presenter, settings,
+                 config_store, history_store, autopilot_factory,
+                 list_windows_fn=None) -> None
+    # 新增方法：
+    def get_config(self) -> AppConfig
+    def save_config(self, cfg: AppConfig) -> None       # 调 config_store.save
+    def list_sessions(self) -> list[SessionMeta]
+    def load_history(self, session_id: str) -> dict[str, HistoryEntry]
+    def search_history(self, keyword: str) -> list[tuple[str, HistoryEntry]]
+    def delete_session(self, session_id: str) -> bool
+    def start_auto(self, hwnd: int, session_name: str) -> None
+        # 若已 running → 先 stop；构造 AutoPilot 并 start(hwnd)
+    def stop_auto(self) -> None
+    def is_auto_running(self) -> bool
+    # GuiState 追加字段：
+    auto_running: bool = False
+    current_session_id: str | None = None
+```
+
 ---
 
 ## 7. 测试规范
@@ -422,7 +458,7 @@ settings          # 隔离的 Settings，全部默认值 + 可覆盖
 | 9     | 打包 exe | ExamChaiTer.spec + scripts/build.ps1 | 产物 dist/ExamChaiTer.exe 存在；双击打开主窗口；无控制台黑框；托盘图标与菜单可用；Ctrl+Alt+Q/S/X 生效（管理员权限下）；缺 API Key 时弹窗提示 |
 | 10    | 配置持久化 + 历史存储 | storage/*.py | ConfigStore + HistoryStore 可读写、可单测；API Key 加密存盘 |
 | 11    | AutoPilot 引擎 | autopilot.py + tts/speaker.py 扩展 | AutoPilot 纯逻辑可单测；Fake 依赖下能跑完整状态机；缓存命中不调 LLM；按题型朗读 N 遍；stop 后 200ms 内 is_running 为 False |
-| 12    | GUI 大改版 | gui/*.py | Windows 风格 + 配置面板 + 历史面板 + 自动模式开关 |
+| 12    | GUI 大改版 | gui/*.py | Windows 浅色风格（Segoe UI + #0078D4 主色 + 圆角按钮 + 卡片留白）；配置面板读写 %APPDATA%\ExamChaiTer\config.json；历史面板列出/切换/搜索 session；自动模式开关一次进入循环、再点停止；AutoPilot 回调全部经 Qt Signal 回主线程 |
 
 每个 Phase 结束打 tag：`v0.1.0-phase<N>`。
 
@@ -503,6 +539,12 @@ Tests: pytest tests/unit/test_xxx.py -q  (N passed)
 
 - AutoPilot 主循环用 _stop_event.wait(interval) 而非 time.sleep，保证 stop 及时返回
 - AutoPilot 每次新答案必须 add_entry(..., flush_now=True)，否则崩溃会丢历史
+
+### Phase 12 GUI 坑清单
+
+- AutoPilot 在工作线程，GUI 更新必须走 QObject.Signal + QueuedConnection，禁止跨线程直接操作 widget
+- Qt 主线程不能调用 pipeline.run_once（会卡 UI），手动作答走 QTimer.singleShot(0) + 状态回填，或用 QThread
+- 配置对话框保存 API Key 时必须调用 ConfigStore.save（走 DPAPI），不得明文落盘
 
 ---
 

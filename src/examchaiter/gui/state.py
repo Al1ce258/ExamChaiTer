@@ -7,13 +7,27 @@ from dataclasses import dataclass
 
 from loguru import logger
 
+from examchaiter.autopilot import AutoPilot, AutoPilotCallbacks
 from examchaiter.capture.window import list_windows as default_list_windows
 from examchaiter.config import Settings
 from examchaiter.models import Answer, WindowInfo
 from examchaiter.output.formatter import to_speech_text
 from examchaiter.output.presenter import Presenter
 from examchaiter.pipeline import ExamPipeline
+from examchaiter.storage.config_store import AppConfig, ConfigStore
+from examchaiter.storage.history_store import HistoryEntry, HistoryStore, SessionMeta
 from examchaiter.tts.speaker import LoopSpeaker
+
+AutoPilotFactory = Callable[[str, AutoPilotCallbacks], AutoPilot]
+
+
+def _noop_callbacks() -> AutoPilotCallbacks:
+    return AutoPilotCallbacks(
+        on_state=lambda _state: None,
+        on_answer=lambda _result, _from_cache: None,
+        on_status=lambda _message: None,
+        on_error=lambda _error: None,
+    )
 
 
 @dataclass
@@ -23,6 +37,8 @@ class GuiState:
     last_question_text: str = ""
     tts_running: bool = False
     busy: bool = False
+    auto_running: bool = False
+    current_session_id: str | None = None
 
 
 class GuiController:
@@ -34,13 +50,21 @@ class GuiController:
         loop_speaker: LoopSpeaker,
         presenter: Presenter,
         settings: Settings,
-        _list_windows_fn: Callable[[str], list[WindowInfo]] | None = None,
+        config_store: ConfigStore,
+        history_store: HistoryStore,
+        autopilot_factory: AutoPilotFactory,
+        list_windows_fn: Callable[[str], list[WindowInfo]] | None = None,
     ) -> None:
         self.pipeline = pipeline_factory()
         self.loop_speaker = loop_speaker
         self.presenter = presenter
         self.settings = settings
-        self._list_windows_fn = _list_windows_fn or default_list_windows
+        self.config_store = config_store
+        self.history_store = history_store
+        self.autopilot_factory = autopilot_factory
+        self.autopilot_callbacks: AutoPilotCallbacks | None = None
+        self._list_windows_fn = list_windows_fn or default_list_windows
+        self._autopilot: AutoPilot | None = None
         self.state = GuiState()
 
     def list_windows(self, title_filter: str = "") -> list[WindowInfo]:
@@ -104,3 +128,72 @@ class GuiController:
 
     def is_tts_running(self) -> bool:
         return self.state.tts_running
+
+    def get_config(self) -> AppConfig:
+        try:
+            return self.config_store.load()
+        except Exception:
+            logger.exception("GUI config load failed")
+            return AppConfig()
+
+    def save_config(self, cfg: AppConfig) -> None:
+        self.config_store.save(cfg)
+
+    def list_sessions(self) -> list[SessionMeta]:
+        try:
+            return list(self.history_store.list_sessions())
+        except Exception:
+            logger.exception("GUI session listing failed")
+            return []
+
+    def load_history(self, session_id: str) -> dict[str, HistoryEntry]:
+        try:
+            return dict(self.history_store.load_session(session_id))
+        except Exception:
+            logger.exception("GUI history load failed")
+            return {}
+
+    def search_history(self, keyword: str) -> list[tuple[str, HistoryEntry]]:
+        try:
+            return list(self.history_store.search(keyword))
+        except Exception:
+            logger.exception("GUI history search failed")
+            return []
+
+    def delete_session(self, session_id: str) -> bool:
+        try:
+            return bool(self.history_store.delete_session(session_id))
+        except Exception:
+            logger.exception("GUI session delete failed")
+            return False
+
+    def start_auto(self, hwnd: int, session_name: str) -> None:
+        try:
+            if self.is_auto_running():
+                self.stop_auto()
+            session_id = self.history_store.create_session(session_name).session_id
+            callbacks = self.autopilot_callbacks or _noop_callbacks()
+            autopilot = self.autopilot_factory(session_id, callbacks)
+            autopilot.start(hwnd)
+            self._autopilot = autopilot
+            self.state.current_session_id = session_id
+            self.state.auto_running = True
+        except Exception:
+            logger.exception("GUI AutoPilot start failed")
+            self._autopilot = None
+            self.state.auto_running = False
+
+    def stop_auto(self) -> None:
+        try:
+            autopilot = self._autopilot
+            if autopilot is not None:
+                autopilot.stop()
+            self._autopilot = None
+            self.state.auto_running = False
+        except Exception:
+            logger.exception("GUI AutoPilot stop failed")
+            self._autopilot = None
+            self.state.auto_running = False
+
+    def is_auto_running(self) -> bool:
+        return self.state.auto_running

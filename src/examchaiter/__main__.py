@@ -389,15 +389,31 @@ def _run_gui(*, fake: bool) -> int:
         print(f"ERROR: PySide6 is unavailable: {exc}", file=sys.stderr)
         return 1
 
-    from examchaiter.app import _build_pipeline
+    from examchaiter.autopilot import AutoPilot, AutoPilotConfig
     from examchaiter.gui.main_window import MainWindow
     from examchaiter.gui.state import GuiController
     from examchaiter.gui.tray import TrayController
-    from examchaiter.models import PipelineResult
+    from examchaiter.llm import FakeLLMClient, OpenAICompatClient
+    from examchaiter.models import OcrBlock, PipelineResult
+    from examchaiter.ocr import FakeOcrEngine, RapidOcrEngine
     from examchaiter.output import Presenter
+    from examchaiter.pipeline import ExamPipeline
+    from examchaiter.storage import ConfigStore, HistoryStore
     from examchaiter.tts import FakeSpeaker, LoopSpeaker, Pyttsx3Speaker
 
-    settings = Settings()
+    config_store = ConfigStore()
+    settings = config_store.to_settings()
+    history_store = HistoryStore(base_dir=config_store.base_dir)
+    app_config = config_store.load()
+    auto_config = AutoPilotConfig(
+        poll_interval=app_config.auto_poll_interval,
+        stable_frames=app_config.auto_stable_frames,
+        speak_choice_repeat=app_config.auto_speak_choice_repeat,
+        speak_fill_repeat=app_config.auto_speak_fill_repeat,
+        speak_short_repeat=app_config.auto_speak_short_repeat,
+        speak_interval=app_config.auto_speak_interval,
+        min_text_len=app_config.min_text_len,
+    )
     argv = ["-platform", "offscreen"] if fake else sys.argv
     instance = QApplication.instance()
     qapp = cast(QApplication, instance) if instance is not None else QApplication(argv)
@@ -408,20 +424,97 @@ def _run_gui(*, fake: bool) -> int:
             def run_once(self, _hwnd: int) -> PipelineResult | None:
                 return None
 
-        controller = GuiController(
-            pipeline_factory=lambda: cast(Any, GuiSmokePipeline()),
-            loop_speaker=LoopSpeaker(FakeSpeaker()),
-            presenter=Presenter(settings, _printer=lambda _text: None),
-            settings=settings,
-            _list_windows_fn=lambda _title: [],
+        class FakeAutoCapture:
+            def grab_window(self, _hwnd: int) -> Any:
+                return object()
+
+            def dhash(self, _image: Any) -> int:
+                return 1
+
+        capture: Any = FakeAutoCapture()
+        ocr: Any = FakeOcrEngine(
+            blocks=[
+                OcrBlock(
+                    text="示例题目 1+1=? 请选择正确答案",
+                    bbox=(0.0, 0.0, 200.0, 20.0),
+                    confidence=0.99,
+                )
+            ]
         )
+        llm: Any = FakeLLMClient(responses=['{"type":"choice","answer":"B"}'])
+        loop_speaker = LoopSpeaker(FakeSpeaker())
+
+        def make_smoke_pipeline() -> Any:
+            return GuiSmokePipeline()
+
+        def list_no_windows(_title: str) -> list[Any]:
+            return []
+
+        pipeline_factory: Any = make_smoke_pipeline
+        presenter: Any = Presenter(settings, _printer=lambda _text: None)
+        list_windows_fn: Any = list_no_windows
     else:
-        controller = GuiController(
-            pipeline_factory=lambda: _build_pipeline(settings),
-            loop_speaker=LoopSpeaker(Pyttsx3Speaker(rate=settings.tts_rate)),
-            presenter=Presenter(settings),
-            settings=settings,
+        from examchaiter.capture.screenshot import dhash as _dhash
+        from examchaiter.capture.screenshot import grab_window as _grab_window
+        from examchaiter.capture.window import focus_window, get_window_rect, is_window_alive
+
+        class ScreenshotCapture:
+            def get_window_rect(self, hwnd: int) -> tuple[int, int, int, int]:
+                return get_window_rect(hwnd)
+
+            def is_window_alive(self, hwnd: int) -> bool:
+                return is_window_alive(hwnd)
+
+            def focus_window(self, hwnd: int) -> bool:
+                return focus_window(hwnd)
+
+            def grab_window(self, hwnd: int) -> Any:
+                return _grab_window(hwnd)
+
+            def dhash(self, image: Any) -> int:
+                return _dhash(image)
+
+        api_key = settings.llm_api_key.get_secret_value() if settings.llm_api_key else ""
+        capture = ScreenshotCapture()
+        ocr = RapidOcrEngine()
+        llm = OpenAICompatClient(
+            base_url=settings.llm_base_url,
+            api_key=api_key,
+            model=settings.llm_model,
+            timeout=settings.llm_timeout_s,
+            max_retry=settings.llm_max_retry,
         )
+        loop_speaker = LoopSpeaker(Pyttsx3Speaker(rate=settings.tts_rate))
+        presenter = Presenter(settings)
+
+        def build_exam_pipeline() -> ExamPipeline:
+            return ExamPipeline(capture=capture, ocr=ocr, llm=llm, settings=settings)
+
+        pipeline_factory = build_exam_pipeline
+        list_windows_fn = None
+
+    def autopilot_factory(session_id: str, callbacks: Any) -> AutoPilot:
+        return AutoPilot(
+            capture=capture,
+            ocr=ocr,
+            llm=llm,
+            loop_speaker=loop_speaker,
+            history_store=history_store,
+            session_id=session_id,
+            config=auto_config,
+            callbacks=callbacks,
+        )
+
+    controller = GuiController(
+        pipeline_factory=pipeline_factory,
+        loop_speaker=loop_speaker,
+        presenter=presenter,
+        settings=settings,
+        config_store=config_store,
+        history_store=history_store,
+        autopilot_factory=autopilot_factory,
+        list_windows_fn=list_windows_fn,
+    )
 
     main_window = MainWindow(controller, settings)
     _tray = TrayController(qapp, main_window, controller)
