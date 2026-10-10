@@ -1,13 +1,18 @@
 """Unit tests for the offline command-line entry point."""
 
+import json
 import sys
 from pathlib import Path
 
+import numpy as np
 import pytest
 from pytest_mock import MockerFixture
 
-from examchaiter.__main__ import main
+from examchaiter.__main__ import _run_debug_capture, main
 from examchaiter.config import Settings
+from examchaiter.llm.client import FakeLLMClient
+from examchaiter.models import OcrBlock, WindowInfo
+from examchaiter.ocr.engine import FakeOcrEngine
 
 
 @pytest.fixture(autouse=True)
@@ -192,3 +197,75 @@ def test_autopilot_dry_run_command_reports_answers(
         "frame 1: questions=['1', '2', '3']" in out,
         "from_cache: fresh=3 cached=3" in out,
     ) == (0, True, True)
+
+
+def test_debug_capture_help_exits_zero() -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["debug-capture", "--help"])
+
+    assert exc_info.value.code == 0
+
+
+def test_debug_capture_with_missing_window_exits_nonzero(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    mocker.patch("examchaiter.capture.window.find_window", return_value=None)
+
+    result = main(
+        [
+            "debug-capture",
+            "--title",
+            "missing",
+            "--out",
+            str(tmp_path / "debug"),
+            "--no-image",
+        ]
+    )
+
+    assert result != 0
+
+
+def test_debug_capture_writes_all_files(tmp_path: Path) -> None:
+    layout_text = "这是一道诊断题，请选择 A/B/C/D。"
+    window = WindowInfo(hwnd=7, title="记事本", rect=(0, 0, 160, 80))
+    ocr = FakeOcrEngine(
+        blocks=[OcrBlock(text=layout_text, bbox=(5.0, 6.0, 120.0, 24.0), confidence=0.98)]
+    )
+    llm = FakeLLMClient(
+        responses=[
+            json.dumps([{"no": "1", "text": layout_text}], ensure_ascii=False),
+            '{"type":"choice","answer":"B"}',
+        ]
+    )
+    image = np.full((80, 160, 3), 255, dtype=np.uint8)
+
+    class FakeCapture:
+        def grab_window(self, _hwnd: int) -> np.ndarray:
+            return image.copy()
+
+    capture = FakeCapture()
+    result = _run_debug_capture(
+        title="记事本",
+        real=False,
+        out=tmp_path / "debug",
+        no_image=False,
+        _find_window=lambda _title: window,
+        _grab_window=capture.grab_window,
+        _ocr=ocr,
+        _llm=llm,
+    )
+
+    run_dir = next((tmp_path / "debug").iterdir())
+    assert result == 0
+    assert {path.name for path in run_dir.iterdir()} == {
+        "01_screenshot.png",
+        "02_ocr_blocks.json",
+        "03_ocr_raw.png",
+        "04_layout_text.txt",
+        "05_split_result.json",
+        "06_messages_1.json",
+        "07_llm_raw_1.txt",
+        "08_parsed_answer_1.json",
+    }
+    split_payload = json.loads((run_dir / "05_split_result.json").read_text(encoding="utf-8"))
+    assert "mode" in split_payload

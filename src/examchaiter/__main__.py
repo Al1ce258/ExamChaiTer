@@ -3,6 +3,8 @@
 import argparse
 import sys
 from collections.abc import Callable, Sequence
+from pathlib import Path
+from typing import Any
 
 from examchaiter import __version__
 from examchaiter.config import Settings
@@ -40,6 +42,15 @@ def _build_parser() -> argparse.ArgumentParser:
     autopilot_parser.add_argument("--session", default="dry-run")
     gui_parser = subparsers.add_parser("gui", help="start the PySide6 GUI")
     gui_parser.add_argument("--fake", action="store_true", help="construct GUI without event loop")
+    debug_parser = subparsers.add_parser(
+        "debug-capture", help="dump capture, OCR, split, and LLM diagnostics"
+    )
+    debug_parser.add_argument("--title", required=True, help="window title substring")
+    debug_parser.add_argument("--real", action="store_true", help="use the configured LLM")
+    debug_parser.add_argument("--out", type=Path, default=Path("debug"), help="output root")
+    debug_parser.add_argument(
+        "--no-image", action="store_true", help="do not save the original screenshot"
+    )
     subparsers.add_parser("show-config", help="print effective settings with secrets masked")
     return parser
 
@@ -69,6 +80,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command is None:
         parser.print_help()
         return 0
+
+    if args.command == "debug-capture":
+        return _run_debug_capture(
+            title=args.title,
+            real=args.real,
+            out=args.out,
+            no_image=args.no_image,
+        )
 
     if args.command == "show-config":
         from examchaiter.storage import ConfigStore
@@ -308,6 +327,181 @@ def main(argv: Sequence[str] | None = None) -> int:
             left, top, right, bottom = window.rect
             print(f"0x{window.hwnd:08X}\t{window.title}\t{left},{top},{right},{bottom}")
 
+    return 0
+
+
+def _run_debug_capture(
+    *,
+    title: str,
+    real: bool,
+    out: Path,
+    no_image: bool,
+    _find_window: Callable[[str], Any] | None = None,
+    _grab_window: Callable[[int], Any] | None = None,
+    _ocr: Any | None = None,
+    _llm: Any | None = None,
+) -> int:
+    import json
+    import re
+    from datetime import datetime
+
+    import numpy as np
+    from PIL import Image, ImageDraw
+
+    from examchaiter.capture.screenshot import grab_window as real_grab_window
+    from examchaiter.capture.window import find_window as real_find_window
+    from examchaiter.llm.client import FakeLLMClient, OpenAICompatClient
+    from examchaiter.llm.prompts import SPLIT_SYSTEM_PROMPT, build_messages, parse_answer
+    from examchaiter.llm.splitter import QuestionSplitter
+    from examchaiter.ocr.engine import RapidOcrEngine
+    from examchaiter.ocr.layout import blocks_to_text
+
+    class FixedDebugLLM(FakeLLMClient):
+        """Return a split payload or a fixed answer for every debug request."""
+
+        def __init__(self) -> None:
+            super().__init__(responses=[])
+
+        def complete(self, messages: list[dict[str, object]], *, json_mode: bool = False) -> str:
+            self.calls.append(messages)
+            if any(message.get("content") == SPLIT_SYSTEM_PROMPT for message in messages):
+                source = str(messages[-1].get("content", ""))
+                return json.dumps([{"no": "", "text": source}], ensure_ascii=False)
+            return '{"type":"choice","answer":"B"}'
+
+    def _to_rgb(image: Any) -> Any:
+        array = np.asarray(image, dtype=np.uint8)
+        if array.ndim == 2:
+            return np.repeat(array[:, :, np.newaxis], 3, axis=2)
+        if array.shape[2] >= 3:
+            return np.ascontiguousarray(array[:, :, :3][:, :, ::-1])
+        raise ValueError("captured image must have at least one channel")
+
+    def _write_json(path: Path, payload: object) -> None:
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if reconfigure is not None:
+        reconfigure(encoding="utf-8")
+
+    settings = Settings()
+    find_fn = _find_window or real_find_window
+    window = find_fn(re.escape(title))
+    if window is None:
+        print(f"ERROR: window not found: {title}", file=sys.stderr)
+        return 1
+
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    run_dir = (Path(out) / timestamp).resolve()
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    capture_fn = _grab_window or real_grab_window
+    image = np.asarray(capture_fn(window.hwnd), dtype=np.uint8)
+    rgb = _to_rgb(image)
+    pil_image = Image.fromarray(rgb)
+    if not no_image:
+        pil_image.save(run_dir / "01_screenshot.png")
+
+    height, width = image.shape[:2]
+    channels = 1 if image.ndim == 2 else int(image.shape[2])
+    gray = np.asarray(pil_image.convert("L"), dtype=np.float64)
+    brightness = float(gray.mean())
+    variance = float(gray.var())
+    print(f"图像信息: {width}x{height}x{channels} 亮度均值={brightness:.2f} 方差={variance:.2f}")
+    if variance < 5.0:
+        print("WARNING: 图像方差低于 5，可能接近全黑或内容缺失")
+
+    ocr = _ocr if _ocr is not None else RapidOcrEngine()
+    blocks = list(ocr.recognize(image))
+    _write_json(
+        run_dir / "02_ocr_blocks.json",
+        [
+            {"text": block.text, "bbox": list(block.bbox), "confidence": block.confidence}
+            for block in blocks
+        ],
+    )
+
+    annotated = pil_image.copy()
+    draw = ImageDraw.Draw(annotated)
+    for block in blocks:
+        x0, y0, x1, y1 = (round(value) for value in block.bbox)
+        draw.rectangle((x0, y0, x1, y1), outline=(255, 0, 0), width=2)
+        print(f"[{block.confidence:.2f}] {block.text!r} @ {block.bbox}")
+    annotated.save(run_dir / "03_ocr_raw.png")
+
+    layout_text = blocks_to_text(blocks)
+    (run_dir / "04_layout_text.txt").write_text(layout_text, encoding="utf-8")
+
+    if _llm is not None:
+        llm = _llm
+    elif real:
+        api_key = settings.llm_api_key.get_secret_value() if settings.llm_api_key else ""
+        if not api_key:
+            print(
+                "ERROR: --real requires EXAMCHAITER_LLM_API_KEY; continuing with FakeLLMClient",
+                file=sys.stderr,
+            )
+            llm = FixedDebugLLM()
+        else:
+            llm = OpenAICompatClient(
+                base_url=settings.llm_base_url,
+                api_key=api_key,
+                model=settings.llm_model,
+                timeout=settings.llm_timeout_s,
+                max_retry=settings.llm_max_retry,
+            )
+    else:
+        llm = FixedDebugLLM()
+
+    splitter = QuestionSplitter(llm, settings)
+    questions = splitter.split(layout_text)
+    _write_json(
+        run_dir / "05_split_result.json",
+        {
+            "mode": splitter.last_mode,
+            "questions": [
+                {"no": question.question_no, "text": question.text} for question in questions
+            ],
+        },
+    )
+
+    labels: list[str] = []
+    used_labels: set[str] = set()
+    for index, question in enumerate(questions, start=1):
+        base = question.question_no.strip() or str(index)
+        label = base
+        suffix = 2
+        while label in used_labels:
+            label = f"{base}-{suffix}"
+            suffix += 1
+        used_labels.add(label)
+        labels.append(label)
+
+        messages = build_messages(question.text)
+        _write_json(run_dir / f"06_messages_{label}.json", messages)
+        try:
+            raw = llm.complete(messages, json_mode=True)
+        except Exception as exc:
+            raw = f"ERROR: {type(exc).__name__}: {exc}"
+        (run_dir / f"07_llm_raw_{label}.txt").write_text(raw, encoding="utf-8")
+        answer = parse_answer(raw)
+        _write_json(
+            run_dir / f"08_parsed_answer_{label}.json",
+            {"qtype": answer.qtype.value, "content": answer.content},
+        )
+
+    print("===== debug-capture 汇总 =====")
+    print(f"窗口: hwnd={window.hwnd} title={window.title}")
+    print(f"图: {width}x{height} 亮度={brightness:.2f}")
+    print(f"OCR 块数: {len(blocks)}")
+    print(f"layout 文本长度: {len(layout_text)}")
+    print(f"拆题: mode={splitter.last_mode} 题数={len(questions)} 题号={labels}")
+    for label in labels:
+        parsed_path = run_dir / f"08_parsed_answer_{label}.json"
+        payload = json.loads(parsed_path.read_text(encoding="utf-8"))
+        print(f"每题 LLM: no={label} qtype={payload['qtype']} answer={payload['content']}")
+    print("================================")
+    print(f"输出目录: {run_dir}")
     return 0
 
 

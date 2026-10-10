@@ -23,25 +23,35 @@ class QuestionSplitter:
     def __init__(self, llm: LLMClient, settings: Settings) -> None:
         self._llm = llm
         self._settings = settings
+        self._last_mode = "fallback"
+
+    @property
+    def last_mode(self) -> str:
+        return self._last_mode
 
     def split(self, raw_text: str) -> list[SplitQuestion]:
         try:
             text = raw_text if isinstance(raw_text, str) else ""
             if not text.strip():
+                self._last_mode = "fallback"
                 return []
 
             regex_questions = self._split_by_patterns(text)
             if regex_questions is not None:
+                self._last_mode = "regex"
                 return regex_questions
 
             llm_questions = self._split_with_llm(text)
             if llm_questions:
+                self._last_mode = "llm"
                 return llm_questions
 
             logger.warning("拆题失败，按整段单题处理")
+            self._last_mode = "fallback"
             return [SplitQuestion(question_no="", text=text.strip())]
         except Exception:
             logger.exception("拆题异常，按整段单题处理")
+            self._last_mode = "fallback"
             fallback = raw_text.strip() if isinstance(raw_text, str) else ""
             return [SplitQuestion(question_no="", text=fallback)]
 

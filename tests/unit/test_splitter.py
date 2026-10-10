@@ -136,3 +136,29 @@ def test_split_patterns_supports_cjk_numbered_list() -> None:
     questions = _splitter().split("一、甲题内容甲乙\n二、乙题内容甲乙")
 
     assert [q.text for q in questions] == ["甲题内容甲乙", "乙题内容甲乙"]
+
+
+def test_last_mode_regex_when_pattern_matches() -> None:
+    splitter = _splitter()
+
+    splitter.split(_NUMBERED)
+
+    assert splitter.last_mode == "regex"
+
+
+def test_last_mode_llm_when_regex_fails() -> None:
+    llm = FakeLLMClient(responses=['[{"no": "1", "text": "甲"}]'])
+    splitter = _splitter(llm)
+
+    splitter.split("没有编号的一整段文本")
+
+    assert splitter.last_mode == "llm"
+
+
+def test_last_mode_fallback_when_both_fail() -> None:
+    llm = FakeLLMClient(responses=["not json"])
+    splitter = _splitter(llm)
+
+    splitter.split("没有编号的一整段文本")
+
+    assert splitter.last_mode == "fallback"

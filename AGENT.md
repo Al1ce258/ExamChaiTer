@@ -132,6 +132,7 @@ Phase 13 不新增依赖：拆题用 re + 现有 LLMClient（无效 regex 由 sp
 └─ logs/
 
 src/examchaiter/
+├─ __main__.py       CLI 入口（含 debug-capture 诊断子命令）
 ├─ config.py        Settings（pydantic-settings，前缀 EXAMCHAITER_）
 ├─ models.py        WindowInfo / OcrBlock / Question / Answer / QuestionType
 ├─ errors.py        自定义异常，全部继承 ExamChaiTerError
@@ -569,6 +570,7 @@ Tests: pytest tests/unit/test_xxx.py -q  (N passed)
 - 存储目录基于 `Path.cwd()`，启动前先 cd 到仓库根
 - `%APPDATA%` 已弃用；不自动迁移，用户手动复制旧数据到 `.examchaiter/`
 - 老版本的 `%APPDATA%\ExamChaiTer\` 内容原样保留，本版本不读、不写、不删
+- `debug-capture` 用于诊断 OCR/拆题问题，每次跑生成 `debug/<timestamp>/` 目录；`debug/` 已 gitignore
 
 ### Phase 9 打包坑清单
 
