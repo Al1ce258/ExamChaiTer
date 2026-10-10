@@ -159,17 +159,35 @@ class ConfigStore:
         self._config = cfg
 
     def to_settings(self) -> Settings:
-        """Build a :class:`Settings` instance from the current :class:`AppConfig`."""
-        config = self._config if self._config is not None else self.load()
-        values: dict[str, Any] = {}
-        for app_field, settings_field in _SETTINGS_FIELD_MAP.items():
-            value = getattr(config, app_field)
-            if app_field == "llm_api_key":
-                value = SecretStr(value) if value else None
-            values[settings_field] = value
-        return Settings(**values)
+        """Build :class:`Settings` without letting an empty config mask ``.env``.
 
-    def _load_from_file(self) -> AppConfig | None:
+        Only fields that actually exist (and are not ``None``) in ``config.json``
+        override the :class:`Settings` base, which is built from the project
+        ``.env`` file, environment variables, and defaults. The API key is
+        resolved separately so an un-decryptable ``api_key_enc`` falls back to
+        the plaintext field or ``.env`` instead of being treated as empty.
+        """
+        base = self._base_settings()
+        raw = self._load_raw_dict() or {}
+        overrides: dict[str, Any] = {}
+        for app_field, settings_field in _SETTINGS_FIELD_MAP.items():
+            if app_field == "llm_api_key":
+                continue
+            if app_field in raw and raw[app_field] is not None:
+                overrides[settings_field] = raw[app_field]
+        api_key = self._resolve_api_key(raw, base)
+        if api_key:
+            overrides["llm_api_key"] = SecretStr(api_key)
+        return base.model_copy(update=overrides)
+
+    @staticmethod
+    def _base_settings() -> Settings:
+        """Build the settings base from the nearest project ``.env`` and env vars."""
+        overrides: dict[str, Any] = {"_env_file": _project_env_file()}
+        return Settings(**overrides)
+
+    def _load_raw_dict(self) -> dict[str, Any] | None:
+        """Return the raw ``config.json`` dict, or ``None`` when missing/corrupt."""
         if not self._config_path.exists():
             return None
         try:
@@ -180,34 +198,50 @@ class ConfigStore:
         if not isinstance(raw, dict):
             logger.warning("配置文件格式非法，回退到环境配置")
             return None
+        return raw
+
+    def _load_from_file(self) -> AppConfig | None:
+        raw = self._load_raw_dict()
+        if raw is None:
+            return None
         config = AppConfig()
         for app_field in fields(AppConfig):
             if app_field.name == "llm_api_key":
                 continue
-            if app_field.name in raw:
+            if app_field.name in raw and raw[app_field.name] is not None:
                 setattr(config, app_field.name, raw[app_field.name])
-        config.llm_api_key = self._read_api_key(raw)
+        config.llm_api_key = self._resolve_api_key(raw, self._base_settings())
         return config
 
-    def _read_api_key(self, raw: dict[str, Any]) -> str:
+    def _resolve_api_key(self, raw: dict[str, Any], base: Settings) -> str:
+        """Resolve the API key: encrypted > plaintext > ``.env``/env > empty."""
         encrypted = raw.get("api_key_enc")
         if isinstance(encrypted, str) and encrypted:
-            return self._decrypt_api_key(encrypted)
-        plaintext = raw.get("api_key")
-        return plaintext if isinstance(plaintext, str) else ""
+            decrypted = self._decrypt(encrypted)
+            if decrypted:
+                return decrypted
+        for marker in ("llm_api_key", "api_key"):
+            plaintext = raw.get(marker)
+            if isinstance(plaintext, str) and plaintext:
+                return plaintext
+        if base.llm_api_key is not None:
+            return base.llm_api_key.get_secret_value()
+        return ""
 
-    def _decrypt_api_key(self, token: str) -> str:
+    @staticmethod
+    def _decrypt(token: str) -> str | None:
+        """Decrypt a DPAPI token, returning ``None`` when it cannot be read."""
         win32crypt = _import_win32crypt()
         if win32crypt is None:
             logger.warning("win32crypt 不可用，无法解密已保存的 API Key")
-            return ""
+            return None
         try:
             blob = base64.b64decode(token)
             decrypted = win32crypt.CryptUnprotectData(blob, None, None, None, 0)
             return bytes(decrypted[1]).decode("utf-8")
         except Exception as exc:
-            logger.warning("API Key 解密失败，已忽略: {}", exc)
-            return ""
+            logger.warning("API Key 解密失败，尝试回落: {}", exc)
+            return None
 
     def _write_api_key(self, api_key: str) -> tuple[str, str]:
         win32crypt = _import_win32crypt()

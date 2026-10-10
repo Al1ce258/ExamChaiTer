@@ -312,3 +312,89 @@ def test_project_env_file_finds_dotenv_in_parent(
     monkeypatch.chdir(nested)
 
     assert config_store_module._project_env_file() == env_file
+
+
+def test_to_settings_preserves_env_key_when_config_json_missing(
+    tmp_path: Path, isolated_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("EXAMCHAITER_LLM_API_KEY", "sk-env")
+    (tmp_path / "config.json").write_text(
+        json.dumps({"llm_base_url": "https://example.test/v1"}), encoding="utf-8"
+    )
+
+    settings = ConfigStore(tmp_path).to_settings()
+
+    assert settings.llm_api_key is not None
+    assert settings.llm_api_key.get_secret_value() == "sk-env"
+
+
+def test_to_settings_prefers_config_json_plaintext_over_env(
+    tmp_path: Path, isolated_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("EXAMCHAITER_LLM_API_KEY", "sk-env")
+    (tmp_path / "config.json").write_text(json.dumps({"llm_api_key": "sk-json"}), encoding="utf-8")
+
+    settings = ConfigStore(tmp_path).to_settings()
+
+    assert settings.llm_api_key is not None
+    assert settings.llm_api_key.get_secret_value() == "sk-json"
+
+
+def test_to_settings_prefers_encrypted_over_plaintext(
+    tmp_path: Path, isolated_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = ConfigStore(tmp_path)
+    monkeypatch.setattr(store, "_decrypt", lambda _token: "sk-enc")
+    (tmp_path / "config.json").write_text(
+        json.dumps({"api_key_enc": "ignored-token", "llm_api_key": "sk-plain"}),
+        encoding="utf-8",
+    )
+
+    settings = store.to_settings()
+
+    assert settings.llm_api_key is not None
+    assert settings.llm_api_key.get_secret_value() == "sk-enc"
+
+
+def test_load_returns_empty_not_none_when_no_key(tmp_path: Path, isolated_env: None) -> None:
+    loaded = ConfigStore(tmp_path).load().llm_api_key
+
+    assert loaded == "" and loaded is not None
+
+
+def test_to_settings_decrypt_failure_falls_back_to_plaintext(
+    tmp_path: Path, isolated_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _break_win32crypt(monkeypatch)
+    token = base64.b64encode(b"enc:sk-x").decode("ascii")
+    (tmp_path / "config.json").write_text(
+        json.dumps({"api_key_enc": token, "llm_api_key": "sk-plain"}), encoding="utf-8"
+    )
+
+    settings = ConfigStore(tmp_path).to_settings()
+
+    assert settings.llm_api_key is not None
+    assert settings.llm_api_key.get_secret_value() == "sk-plain"
+
+
+def test_to_settings_decrypt_failure_falls_back_to_env(
+    tmp_path: Path, isolated_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _break_win32crypt(monkeypatch)
+    monkeypatch.setenv("EXAMCHAITER_LLM_API_KEY", "sk-env")
+    token = base64.b64encode(b"enc:sk-x").decode("ascii")
+    (tmp_path / "config.json").write_text(json.dumps({"api_key_enc": token}), encoding="utf-8")
+
+    settings = ConfigStore(tmp_path).to_settings()
+
+    assert settings.llm_api_key is not None
+    assert settings.llm_api_key.get_secret_value() == "sk-env"
+
+
+def test_to_settings_does_not_override_with_none(
+    tmp_path: Path, isolated_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("EXAMCHAITER_LLM_MODEL", "deepseek-chat")
+    (tmp_path / "config.json").write_text("{}", encoding="utf-8")
+
+    assert ConfigStore(tmp_path).to_settings().llm_model == "deepseek-chat"

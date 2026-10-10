@@ -220,6 +220,15 @@ class QuestionSplitter:
     def split(self, raw_text: str) -> list[SplitQuestion]
         # 正则优先 → LLM 兜底 → 单题降级（永不抛异常）
 
+# ---- llm/client.py（LazyLLMClient）----
+class LazyLLMClient:
+    """延迟构造真实 LLM 客户端；构造失败时抛 LLMFailed。
+    用于 GUI 启动阶段：无 key 时不阻塞 GUI，等到首次 complete() 才报错。"""
+    def __init__(self, factory: Callable[[], LLMClient]) -> None
+    def complete(self, messages, *, json_mode=False) -> str
+        # 首次调用时调 factory() 并缓存结果；后续调用走缓存
+        # factory 抛异常 → 直接抛 LLMFailed；构造阶段禁止访问网络
+
 # ---- tts ----
 LoopSpeaker(speaker: Speaker, interval_s: float = 3.0)
     .start(text, max_repeats: int | None = None) / .stop() / .is_running() -> bool
@@ -247,11 +256,20 @@ class GuiController:
     def pick_window(self, title_filter: str) -> WindowInfo | None: ...
     def answer_once(self) -> list[PipelineResult]   # 变更：返回本帧所有题
     def toggle_tts(self) -> bool: ...
+    def get_llm_status(self) -> str   # "ready" / "unconfigured"，纯本地判断，禁止网络请求
+    def is_llm_ready(self) -> bool
     # GuiState：last_results: list[PipelineResult]（替换原 last_answer 字段）
     # 保留 last_answer 为只读快捷访问 = last_results[-1].answer if last_results else None
 ```
 
 **GUI 铁律**：GUI 文件内禁止直接 new OpenAICompatClient / RapidOcrEngine / win32gui 等具体实现，全部从 MainWindow.__init__ 注入。
+
+**GUI 启动契约**：
+- `_run_gui` 必须通过 `ConfigStore().to_settings()` 获取 settings（保持）
+- `_run_gui` 不得在启动阶段强制构造真实 LLM 客户端；构造失败→构造 `LazyLLMClient`，GUI 照常启动
+- 无 key 时：状态栏显示「未配置 API Key，请点击配置」
+- 点「作答一次」/开启自动模式时：若 `is_llm_ready()` 为假，弹 QMessageBox 引导去配置，不得进入 pipeline
+- GUI 必须能在无 key、无网络、跨机器的环境下启动
 
 ```python
 # ---- storage/hashing.py（纯函数）----
@@ -305,12 +323,17 @@ class ConfigStore:
     def load(self) -> AppConfig
         # 优先级：base_dir/config.json > 项目根 .env > AppConfig 默认值
         # config.json 不存在时返回基于 .env 的 AppConfig
+        # llm_api_key：api_key_enc 解密成功 > 明文 llm_api_key/api_key > .env > ""（空串，不是 None）
+        # DPAPI 解密失败只 log.warning 并降级，不得当成空值直接丢弃
     def save(self, cfg: AppConfig) -> None
         # 原子写：先写 config.json.tmp 再 os.replace
         # api_key 用 win32crypt.CryptProtectData 加密后 base64 存入字段 "api_key_enc"
         # 若 win32crypt 不可用 → 明文存入 "api_key" 并在日志里 warning（仅一次）
     def to_settings(self) -> Settings
-        # 返回 examchaiter.config.Settings 实例，用 AppConfig 字段覆盖默认值
+        # base = Settings(_env_file=项目根 .env)，即先读 .env + 环境变量 + 默认值
+        # 只覆盖 config.json 里实际存在且非 None 的字段；缺失字段保留 base（.env 生效）
+        # llm_api_key：api_key_enc 解密成功 > 明文 > .env/环境变量 > None（无 key 时）
+        # 禁止用 None 覆盖 .env 已有值；否则 gui 会读到空 key
 
 # ---- storage/history_store.py（schema v2）----
 @dataclass
@@ -577,6 +600,14 @@ Tests: pytest tests/unit/test_xxx.py -q  (N passed)
 - [ ] 我是否跨 Phase 了？
 - [ ] 我的代码块是否完整，没有 `...省略...`？
 - [ ] 我是否给出了可执行的验证命令和 commit message？
+
+### Phase 16.3 配置/GUI 启动坑清单
+
+- `ConfigStore.to_settings` 不得用 None 覆盖 .env 的已有值（config.json 缺失字段要保留 base）
+- DPAPI 解密失败必须降级到明文 / .env，不得当空处理
+- GUI 启动阶段禁止访问网络；构造 LLM 客户端不得抛异常，无 key 时走 LazyLLMClient
+- 未配置 API Key 时点作答/自动模式必须弹框引导配置，禁止直接进 pipeline
+- 跨机器部署时 config.json 的 api_key_enc 失效，用户需在 GUI 里重填
 
 - 存储目录基于 `Path.cwd()`，启动前先 cd 到仓库根
 - `%APPDATA%` 已弃用；不自动迁移，用户手动复制旧数据到 `.examchaiter/`
